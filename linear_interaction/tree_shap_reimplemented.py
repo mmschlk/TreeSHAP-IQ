@@ -221,7 +221,7 @@ class LinearTreeSHAPExplainer:
             self.shapley_values[feature_id] -= (p_e_ancestor - 1) * psi
 
     @staticmethod
-    def _get_binomial_polynom(degree: int) -> Polynomial:
+    def _get_binomial_polynomial(degree: int) -> Polynomial:
         """Get a reciprocal binomial polynomial with degree d.
 
         The reciprocal binomial polynomial is defined as `\sum_{i=0}^{d} binom(d, i)^{-1} * x^{i}`.
@@ -261,7 +261,7 @@ class LinearTreeSHAPExplainer:
         Returns:
             float: The psi function for the polynomial.
         """
-        binomial_polynomial = self._get_binomial_polynom(polynomial.degree())
+        binomial_polynomial = self._get_binomial_polynomial(polynomial.degree())
         inner_product = np.inner(polynomial.coef, binomial_polynomial.coef)
         return inner_product / (polynomial.degree() + 1)
 
