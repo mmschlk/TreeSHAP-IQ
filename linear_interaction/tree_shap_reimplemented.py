@@ -17,13 +17,15 @@ class LinearTreeSHAPExplainer:
             children_left=self.children_left,
             children_right=self.children_right
         )  # -1 for the root node
-        self.leaf_predictions: np.ndarray = tree_model.leaf_predictions  # zero for non-leaf nodes
+        self.leaf_predictions: np.ndarray = tree_model.leaf_predictions  # can be zero for non-leaf nodes
         self.features: np.ndarray = tree_model.features  # -2 for leaf nodes
         self.thresholds: np.ndarray = tree_model.thresholds  # -2 for leaf nodes
 
+        # conditional probabilities for each decision node
         sample_weights = self._get_conditional_sample_weights(tree_model.sample_weights)
         self.sample_weights: np.ndarray = sample_weights  # in [0, 1] for all nodes
 
+        # the marginal probabilities of the leaf nodes
         self.probabilities = tree_model.sample_weights / np.max(tree_model.sample_weights)
 
         # set the root node id and number of features
@@ -109,10 +111,11 @@ class LinearTreeSHAPExplainer:
                 # get the edge information with the node as the head
                 parent_id = self.parents[node_id]
                 feature_id = self.features[parent_id]
+                feature_threshold = self.thresholds[parent_id]
                 edge_weight = self.sample_weights[node_id]
 
                 # get weight of the edge
-                p_e = self._get_p_e(x, feature_id, edge_weight, feature_path_weights, parent_id, went_left)
+                p_e = self._get_p_e(x, feature_id, edge_weight, feature_path_weights, feature_threshold, went_left)
                 path_summary_poly = path_summary_poly * Polynomial([p_e, 1])
 
                 # check weather the feature has been observed before in the path
@@ -221,9 +224,10 @@ class LinearTreeSHAPExplainer:
             parent_id = self.parents[node_id]
             feature_id = self.features[parent_id]
             edge_weight = self.sample_weights[node_id]
+            feature_threshold = self.thresholds[parent_id]
 
             # get weight of the edge
-            p_e = self._get_p_e(x, feature_id, edge_weight, feature_path_weights, self.thresholds[parent_id], went_left)
+            p_e = self._get_p_e(x, feature_id, edge_weight, feature_path_weights, feature_threshold, went_left)
 
             # check weather the feature has been observed before in the path
             if seen_features[feature_id]:
@@ -374,9 +378,12 @@ class LinearTreeSHAPExplainer:
 
 
 if __name__ == "__main__":
+    DO_TREE_SHAP = False
+
     from linear_interaction.utils import convert_tree
 
-    from shap import TreeExplainer
+    if DO_TREE_SHAP:
+        from shap import TreeExplainer
 
     from collections import namedtuple
     from sklearn.datasets import make_regression
@@ -390,16 +397,16 @@ if __name__ == "__main__":
     np.random.seed(random_seed)
 
     # create dummy regression dataset and fit tree model
-    x, y = make_regression(1000, n_features=10, random_state=random_seed)
-    clf = DecisionTreeRegressor(max_depth=3, random_state=random_seed).fit(x, y)
+    X, y = make_regression(1000, n_features=10, random_state=random_seed)
+    clf = DecisionTreeRegressor(max_depth=3, random_state=random_seed).fit(X, y)
 
     # convert the tree to be usable like in TreeSHAP
     tree_model = convert_tree(clf)
 
-    x_input = x[:1]
+    x_input = X[:1]
     print("Output f(x):", clf.predict(x_input)[0])
 
-    plt.figure(dpi=250)
+    plt.figure(dpi=150)
     plot_tree(clf)
     plt.savefig("tree.pdf")
 
@@ -419,27 +426,28 @@ if __name__ == "__main__":
         "trees": [tree_dict]
     }
 
-    # explain the tree with observational TreeSHAP
-    explainer_shap = TreeExplainer(model, feature_perturbation="tree_path_dependent")
-    start_time = time.time()
-    sv_tree_shap = explainer_shap.shap_values(x_input)
-    time_elapsed = time.time() - start_time
-    print("TreeSHAP - SVs (obs.)    ", sv_tree_shap)
-    print("TreeSHAP - sum SVs (obs.)", sv_tree_shap.sum() + explainer_shap.expected_value)
-    print("TreeSHAP - time elapsed  ", time_elapsed)
+    if DO_TREE_SHAP:
+        # explain the tree with observational TreeSHAP
+        explainer_shap = TreeExplainer(model, feature_perturbation="tree_path_dependent")
+        start_time = time.time()
+        sv_tree_shap = explainer_shap.shap_values(x_input)
+        time_elapsed = time.time() - start_time
+        print("TreeSHAP - SVs (obs.)    ", sv_tree_shap)
+        print("TreeSHAP - sum SVs (obs.)", sv_tree_shap.sum() + explainer_shap.expected_value)
+        print("TreeSHAP - time elapsed  ", time_elapsed)
 
-    # explain the tree with interventional TreeSHAP
-    explainer_shap = TreeExplainer(model, feature_perturbation="interventional")
-    start_time = time.time()
-    sv_tree_shap = explainer_shap.shap_values(x_input)
-    time_elapsed = time.time() - start_time
-    print("TreeSHAP - SVs (int.)    ", sv_tree_shap)
-    print("TreeSHAP - sum SVs (int.)", sv_tree_shap.sum() + explainer_shap.expected_value)
-    print("TreeSHAP - time elapsed  ", time_elapsed)
+        # explain the tree with interventional TreeSHAP
+        explainer_shap = TreeExplainer(model, feature_perturbation="interventional")
+        start_time = time.time()
+        sv_tree_shap = explainer_shap.shap_values(x_input)
+        time_elapsed = time.time() - start_time
+        print("TreeSHAP - SVs (int.)    ", sv_tree_shap)
+        print("TreeSHAP - sum SVs (int.)", sv_tree_shap.sum() + explainer_shap.expected_value)
+        print("TreeSHAP - time elapsed  ", time_elapsed)
 
     # LinearTreeSHAP -------------------------------------------------------------------------------
 
-    explainer = LinearTreeSHAPExplainer(tree_model=tree_model, n_features=x.shape[1])
+    explainer = LinearTreeSHAPExplainer(tree_model=tree_model, n_features=x_input.shape[1])
     start_time = time.time()
     sv_linear_tree_shap = explainer.explain(x_input[0])
     time_elapsed = time.time() - start_time
