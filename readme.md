@@ -9,3 +9,23 @@ Install the dependencies via pip:
 ```bash
 pip install -r requirements.txt
 ```
+
+Warning: If you want to compare the results with the original TreeSHAP implementation, you need to 
+install the original TreeSHAP implementation from `pip` and change two lines of code in there.
+
+Change line 250 in _tree.py_ from
+```python
+X_missing = np.isnan(X, dtype=np.bool)
+```
+to
+```python
+X_missing = np.isnan(X, dtype=bool)
+``` 
+and change line 1102 in _tree.py_ from
+```python
+X_missing = np.isnan(X, dtype=np.bool)
+```
+to
+```python
+X_missing = np.isnan(X, dtype=bool)
+```

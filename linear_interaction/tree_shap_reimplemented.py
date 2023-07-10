@@ -1,4 +1,6 @@
 """This module contains the linear TreeSHAP class, which is a reimplementation of the original TreeSHAP algorithm."""
+import time
+
 import numpy as np
 from numpy.polynomial import Polynomial
 from numpy.polynomial.polynomial import polydiv, polymul
@@ -46,7 +48,7 @@ class LinearTreeSHAPExplainer:
 
         # get empty prediction of model
         self.empty_prediction = self.probabilities * self.leaf_predictions
-        self.empty_prediction: float = np.sum(self.empty_prediction[self.leaf_mask])
+        self.empty_prediction: float = float(np.sum(self.empty_prediction[self.leaf_mask]))
 
     def explain(self, x: np.ndarray):
         # get an array index by the nodes
@@ -374,6 +376,8 @@ class LinearTreeSHAPExplainer:
 if __name__ == "__main__":
     from linear_interaction.utils import convert_tree
 
+    from shap import TreeExplainer
+
     from collections import namedtuple
     from sklearn.datasets import make_regression
     from sklearn.tree import DecisionTreeRegressor, plot_tree
@@ -389,18 +393,56 @@ if __name__ == "__main__":
     x, y = make_regression(1000, n_features=10, random_state=random_seed)
     clf = DecisionTreeRegressor(max_depth=3, random_state=random_seed).fit(x, y)
 
+    # convert the tree to be usable like in TreeSHAP
+    tree_model = convert_tree(clf)
+
+    x_input = x[:1]
+    print("Output f(x):", clf.predict(x_input)[0])
+
     plt.figure(dpi=250)
     plot_tree(clf)
     plt.savefig("tree.pdf")
-    # plt.show()
 
-    # copy the tree
-    tree_model = convert_tree(clf)
+    # TreeSHAP -------------------------------------------------------------------------------------
+
+    tree_dict = {
+        "children_left": tree_model.children_left.copy(),
+        "children_right": tree_model.children_right.copy(),
+        "children_default": tree_model.children_left.copy(),
+        "features": tree_model.features.copy(),
+        "thresholds": tree_model.thresholds.copy(),
+        "values": tree_model.leaf_predictions.reshape(-1, 1).copy(),
+        "node_sample_weight": tree_model.sample_weights.copy(),
+    }
+
+    model = {
+        "trees": [tree_dict]
+    }
+
+    # explain the tree with observational TreeSHAP
+    explainer_shap = TreeExplainer(model, feature_perturbation="tree_path_dependent")
+    start_time = time.time()
+    sv_tree_shap = explainer_shap.shap_values(x_input)
+    time_elapsed = time.time() - start_time
+    print("TreeSHAP - SVs (obs.)    ", sv_tree_shap)
+    print("TreeSHAP - sum SVs (obs.)", sv_tree_shap.sum() + explainer_shap.expected_value)
+    print("TreeSHAP - time elapsed  ", time_elapsed)
+
+    # explain the tree with interventional TreeSHAP
+    explainer_shap = TreeExplainer(model, feature_perturbation="interventional")
+    start_time = time.time()
+    sv_tree_shap = explainer_shap.shap_values(x_input)
+    time_elapsed = time.time() - start_time
+    print("TreeSHAP - SVs (int.)    ", sv_tree_shap)
+    print("TreeSHAP - sum SVs (int.)", sv_tree_shap.sum() + explainer_shap.expected_value)
+    print("TreeSHAP - time elapsed  ", time_elapsed)
+
+    # LinearTreeSHAP -------------------------------------------------------------------------------
 
     explainer = LinearTreeSHAPExplainer(tree_model=tree_model, n_features=x.shape[1])
-    sv = explainer.explain(x[:2][0])
-    print("\u03c6:", sv)
-    print("sum \u03c6", sv.sum())
-    print("f(\u2205):", explainer.empty_prediction)
-    print("sum of all sv:", explainer.empty_prediction + sv.sum())
-    print("f(x):", clf.predict(x[:1])[0])
+    start_time = time.time()
+    sv_linear_tree_shap = explainer.explain(x_input[0])
+    time_elapsed = time.time() - start_time
+    print("Linear - SVs (obs.)      ", sv_linear_tree_shap)
+    print("Linear - sum SVs (obs.)  ", sv_linear_tree_shap.sum() + explainer.empty_prediction)
+    print("Linear - time elapsed    ", time_elapsed)
