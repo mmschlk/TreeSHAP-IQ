@@ -121,7 +121,7 @@ class LinearTreeSHAPExplainer:
                     p_e_ancestor = feature_path_weights[feature_id]
                     quotient_polynomial = Polynomial(polydiv(path_summary_poly.coef, Polynomial([p_e_ancestor, 1]).coef)[0])
                     path_summary_poly = quotient_polynomial
-                    feature_path_weights[feature_id] *= p_e
+                    feature_path_weights[feature_id] = p_e
                 else:
                     feature_path_weights[feature_id] = p_e
                     seen_features[feature_id] = True
@@ -229,7 +229,7 @@ class LinearTreeSHAPExplainer:
             if seen_features[feature_id]:
                 # the value in feature_path_weights contains p_e of the ancestor
                 p_e_ancestor = feature_path_weights[feature_id]
-                feature_path_weights[feature_id] *= p_e
+                feature_path_weights[feature_id] = p_e
                 height_of_ancestor = height_of_feature_ancestors[feature_id]
             else:
                 p_e_ancestor = 1
