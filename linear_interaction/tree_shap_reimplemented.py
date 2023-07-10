@@ -318,7 +318,7 @@ class LinearTreeSHAPExplainer:
             feature_id (int): The id of the feature of the edge.
             edge_weight (float): The weight of the edge.
             feature_path_weights (np.ndarray[float]): The weights of the feature paths.
-            parent_id (int): The id of the parent node of the edge.
+            feature_threshold (int): The id of the parent node of the edge.
             went_left (bool): Whether the instance went left or right at the parent node.
 
         Returns:
