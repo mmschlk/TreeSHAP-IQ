@@ -17,6 +17,8 @@ class LinearTreeSHAPExplainer:
             children_left=self.children_left,
             children_right=self.children_right
         )  # -1 for the root node
+        #self.leaf_predictions = np.zeros(shape=self.children_left.shape, dtype=float)  # TODO remove this
+        #self.leaf_predictions[3] = 100.  # TODO remove this
         self.leaf_predictions: np.ndarray = tree_model.leaf_predictions  # can be zero for non-leaf nodes
         self.features: np.ndarray = tree_model.features  # -2 for leaf nodes
         self.thresholds: np.ndarray = tree_model.thresholds  # -2 for leaf nodes
@@ -100,7 +102,17 @@ class LinearTreeSHAPExplainer:
 
         # if node is a leaf (base case of the recursion)
         if self.leaf_mask[node_id]:
-            # TODO might be wrong in the paper they do matrix multiply
+
+            # TODO refactor this such that we always do this without the weird if-else
+
+            parent_id = self.parents[node_id]
+            feature_id = self.features[parent_id]
+            feature_threshold = self.thresholds[parent_id]
+            edge_weight = self.sample_weights[node_id]
+            p_e = self._get_p_e(x, feature_id, edge_weight, feature_path_weights, feature_threshold, went_left)
+            path_summary_poly = path_summary_poly * Polynomial([p_e, 1])
+            # TODO probably need to do something with the ancestor as well here
+
             leaf_prediction = self.leaf_predictions[node_id]
             leaf_prediction *= self.probabilities[node_id]
             self.summary_polynomials[node_id] = path_summary_poly * leaf_prediction
@@ -120,14 +132,13 @@ class LinearTreeSHAPExplainer:
 
                 # check weather the feature has been observed before in the path
                 if seen_features[feature_id]:
-                    # the value in feature_path_weights contains p_e of the ancestor
+                    # the value in feature_path_weights contains p_e of an ancestor
                     p_e_ancestor = feature_path_weights[feature_id]
                     quotient_polynomial = Polynomial(polydiv(path_summary_poly.coef, Polynomial([p_e_ancestor, 1]).coef)[0])
                     path_summary_poly = quotient_polynomial
-                    feature_path_weights[feature_id] = p_e
                 else:
-                    feature_path_weights[feature_id] = p_e
                     seen_features[feature_id] = True
+                feature_path_weights[feature_id] = p_e
 
             # compute the summary polynomials for the left and right child nodes
             left_child_id, right_child_id = self.children_left[node_id], self.children_right[
@@ -246,14 +257,14 @@ class LinearTreeSHAPExplainer:
             psi = self._psi(quotient)
             self.shapley_values[feature_id] += (p_e - 1) * psi
 
-            # TOOD check if this works
+            # TOOD ancestors are commented out atm
             # the part below is only needed if the feature was already encountered not in this example
-            psi_numerator = Polynomial([1, 1]) ** max((height_of_ancestor - depth_in_tree), 0)  # TODO could be wrong the max and 1 default
-            psi_numerator = self.summary_polynomials[node_id] * psi_numerator
-            psi_denominator = Polynomial([p_e_ancestor, 1])
-            quotient = Polynomial(polydiv(psi_numerator.coef, psi_denominator.coef)[0])
-            psi = self._psi(quotient)
-            self.shapley_values[feature_id] -= (p_e_ancestor - 1) * psi
+            #psi_numerator = Polynomial([1, 1]) ** max((height_of_ancestor - depth_in_tree), 0)  # TODO could be wrong the max and 1 default
+            #psi_numerator = self.summary_polynomials[node_id] * psi_numerator
+            #psi_denominator = Polynomial([p_e_ancestor, 1])
+            #quotient = Polynomial(polydiv(psi_numerator.coef, psi_denominator.coef)[0])
+            #psi = self._psi(quotient)
+            #self.shapley_values[feature_id] -= (p_e_ancestor - 1) * psi
 
     @staticmethod
     def _get_binomial_polynomial(degree: int) -> Polynomial:
@@ -318,7 +329,7 @@ class LinearTreeSHAPExplainer:
             feature_id (int): The id of the feature of the edge.
             edge_weight (float): The weight of the edge.
             feature_path_weights (np.ndarray[float]): The weights of the feature paths.
-            feature_threshold (int): The id of the parent node of the edge.
+            feature_threshold (float): The id of the parent node of the edge.
             went_left (bool): Whether the instance went left or right at the parent node.
 
         Returns:
@@ -331,8 +342,8 @@ class LinearTreeSHAPExplainer:
         else:
             if x[feature_id] > feature_threshold:
                 activation = 1
-        p_e = edge_weight * feature_path_weights[feature_id]
-        return activation * 1 / p_e
+        p_e = feature_path_weights[feature_id] * 1 / edge_weight
+        return activation * p_e
 
     @staticmethod
     def _get_parent_array(
@@ -378,14 +389,18 @@ class LinearTreeSHAPExplainer:
 
 
 if __name__ == "__main__":
-    DO_TREE_SHAP = False
+    DO_TREE_SHAP = True
+    DO_PLOTTING = True
 
     from linear_interaction.utils import convert_tree
 
     if DO_TREE_SHAP:
-        from shap import TreeExplainer
+        try:
+            from shap import TreeExplainer
+        except ImportError:
+            print("TreeSHAP not available. Please install shap package.")
+            DO_TREE_SHAPE = False
 
-    from collections import namedtuple
     from sklearn.datasets import make_regression
     from sklearn.tree import DecisionTreeRegressor, plot_tree
     import matplotlib.pyplot as plt
@@ -393,7 +408,6 @@ if __name__ == "__main__":
 
     # fix random seed for reproducibility
     random_seed = 10
-    #random_seed = 42
     np.random.seed(random_seed)
 
     # create dummy regression dataset and fit tree model
@@ -406,9 +420,10 @@ if __name__ == "__main__":
     x_input = X[:1]
     print("Output f(x):", clf.predict(x_input)[0])
 
-    plt.figure(dpi=150)
-    plot_tree(clf)
-    plt.savefig("tree.pdf")
+    if DO_PLOTTING:
+        plt.figure(dpi=150)
+        plot_tree(clf)
+        plt.savefig("tree.pdf")
 
     # TreeSHAP -------------------------------------------------------------------------------------
 
@@ -428,29 +443,21 @@ if __name__ == "__main__":
 
     if DO_TREE_SHAP:
         # explain the tree with observational TreeSHAP
-        explainer_shap = TreeExplainer(model, feature_perturbation="tree_path_dependent")
         start_time = time.time()
+        explainer_shap = TreeExplainer(model, feature_perturbation="tree_path_dependent")
         sv_tree_shap = explainer_shap.shap_values(x_input)
         time_elapsed = time.time() - start_time
         print("TreeSHAP - SVs (obs.)    ", sv_tree_shap)
         print("TreeSHAP - sum SVs (obs.)", sv_tree_shap.sum() + explainer_shap.expected_value)
         print("TreeSHAP - time elapsed  ", time_elapsed)
 
-        # explain the tree with interventional TreeSHAP
-        explainer_shap = TreeExplainer(model, feature_perturbation="interventional")
-        start_time = time.time()
-        sv_tree_shap = explainer_shap.shap_values(x_input)
-        time_elapsed = time.time() - start_time
-        print("TreeSHAP - SVs (int.)    ", sv_tree_shap)
-        print("TreeSHAP - sum SVs (int.)", sv_tree_shap.sum() + explainer_shap.expected_value)
-        print("TreeSHAP - time elapsed  ", time_elapsed)
-
     # LinearTreeSHAP -------------------------------------------------------------------------------
 
-    explainer = LinearTreeSHAPExplainer(tree_model=tree_model, n_features=x_input.shape[1])
     start_time = time.time()
+    explainer = LinearTreeSHAPExplainer(tree_model=tree_model, n_features=x_input.shape[1])
     sv_linear_tree_shap = explainer.explain(x_input[0])
     time_elapsed = time.time() - start_time
     print("Linear - SVs (obs.)      ", sv_linear_tree_shap)
     print("Linear - sum SVs (obs.)  ", sv_linear_tree_shap.sum() + explainer.empty_prediction)
     print("Linear - time elapsed    ", time_elapsed)
+    print("Linear - empty prediction", explainer.empty_prediction)
