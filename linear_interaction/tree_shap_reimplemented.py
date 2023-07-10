@@ -99,8 +99,8 @@ class LinearTreeSHAPExplainer:
             # check weather the feature has been observed before in the path
             if seen_features[feature_id]:
                 # the value in feature_path_weights contains p_e of an ancestor
-                p_e_of_feature_ancestors[node_id] = feature_path_weights[feature_id]
-                height_of_feature_ancestors[node_id] = feature_path_depths[feature_id]
+                p_e_of_feature_ancestors[node_id] = feature_path_weights[feature_id].copy()
+                height_of_feature_ancestors[node_id] = feature_path_depths[feature_id].copy()
                 #divide by p_e_ancestor
                 path_summary_poly = Polynomial(polydiv(path_summary_poly.coef,Polynomial([feature_path_weights[feature_id],1]).coef)[0])
 
@@ -165,8 +165,9 @@ class LinearTreeSHAPExplainer:
             # the part below is only needed if the feature was already encountered not in this example
             if node_id in p_e_of_feature_ancestors:
                 p_e_ancestor = p_e_of_feature_ancestors[node_id]
-                psi_factor = Polynomial([1, 1]) ** (depth_in_tree-height_of_feature_ancestors[node_id])  # TODO could be wrong the max and 1 default
-                psi_denominator = Polynomial([p_e_ancestor, 1])*psi_factor
+                #maybe mistake in paper?
+                #psi_factor = Polynomial([1, 1]) ** (depth_in_tree-height_of_feature_ancestors[node_id])  # TODO could be wrong the max and 1 default
+                psi_denominator = Polynomial([p_e_ancestor, 1])#*psi_factor
                 quotient_ancestor = Polynomial(polydiv(self.summary_polynomials[node_id].coef, psi_denominator.coef)[0])
                 psi_ancestor = self._psi(quotient_ancestor)
                 self.shapley_values[feature_id] -= (p_e_ancestor - 1) * psi_ancestor
