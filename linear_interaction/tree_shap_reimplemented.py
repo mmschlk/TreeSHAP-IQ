@@ -17,14 +17,13 @@ class LinearTreeSHAPExplainer:
             children_left=self.children_left,
             children_right=self.children_right
         )  # -1 for the root node
-        #self.leaf_predictions = np.zeros(shape=self.children_left.shape, dtype=float)  # TODO remove this
-        #self.leaf_predictions[3] = 100.  # TODO remove this
         self.leaf_predictions: np.ndarray = tree_model.leaf_predictions  # can be zero for non-leaf nodes
         self.features: np.ndarray = tree_model.features  # -2 for leaf nodes
         self.thresholds: np.ndarray = tree_model.thresholds  # -2 for leaf nodes
 
         # conditional probabilities for each decision node
-        sample_weights = self._get_conditional_sample_weights(tree_model.sample_weights)
+        sample_weights = tree_model.sample_weights
+        sample_weights = self._get_conditional_sample_weights(sample_weights, self.parents)
         self.sample_weights: np.ndarray = sample_weights  # in [0, 1] for all nodes
 
         # the marginal probabilities of the leaf nodes
@@ -58,7 +57,8 @@ class LinearTreeSHAPExplainer:
         # get an array index by the nodes
         initial_polynomial = Polynomial([1.])
         #self._compute_summary_polynomials(x, self.root_node_id, initial_polynomial)
-        self._compute_shapley_values(x,self.root_node_id,initial_polynomial)
+
+        self._compute_shapley_values(x, self.root_node_id, initial_polynomial)
         # get an array indexed by the features
         #self._aggregate_shapley(x, self.root_node_id)
         return self.shapley_values.copy()
@@ -68,111 +68,136 @@ class LinearTreeSHAPExplainer:
             x: np.ndarray,
             node_id: int,
             path_summary_poly: Polynomial,
-            feature_path_weights: np.ndarray[float] = None,
+            p_e_of_feature_ancestor: np.ndarray[float] = None,
             depth_in_tree: int = 0,
             seen_features: np.ndarray[bool] = None,
+            #seen_feature_sv: np.ndarray[bool] = None,
             went_left: bool = None,
-            feature_path_depths: np.ndarray[float] = None,
-            height_of_feature_ancestors: dict = {},
-            p_e_of_feature_ancestors: dict = {}
+            seen_features_degree: np.ndarray[int] = None,
+            #height_of_feature_ancestors: dict = {},
+            #p_e_of_feature_ancestors: dict = {}
     ):
-        # initialize vectors
-        if feature_path_weights is None:
-            feature_path_weights: np.ndarray = np.ones(self.n_features, dtype=float)
-        if feature_path_depths is None:
-            feature_path_depths: np.ndarray = np.ones(self.n_features, dtype=float)
-        if seen_features is None:
-            seen_features: np.ndarray = np.zeros(self.n_features, dtype=bool)
-        # node is not a leaf, and we traverse the tree (recursion case)
-        # if node is not the root node then there is an edge with a feature here
+        # to store the p_e(x) of the feature ancestors when the feature was seen last in the path
+        p_e_of_feature_ancestor: np.ndarray[float] = np.ones(self.n_features, dtype=float) if p_e_of_feature_ancestor is None else p_e_of_feature_ancestor
+
+        # to store the degrees of the summary polynom when the feature was seen last in the path
+        seen_features_degree: np.ndarray[int] = np.ones(self.n_features, dtype=int) if seen_features_degree is None else seen_features_degree
+
+        # to store if a feature was already seen in the path in constant space
+        seen_features: np.ndarray[bool] = np.zeros(self.n_features, dtype=bool) if seen_features is None else seen_features
+
+        #seen_features_sv: np.ndarray[bool] = np.zeros(self.n_features, dtype=bool) if seen_feature_sv is None else seen_feature_sv
+
+        # get node / edge information
+        parent_id = self.parents[node_id]
+        feature_id = self.features[parent_id]
+        feature_threshold = self.thresholds[parent_id]
+        edge_weight = self.sample_weights[node_id]
+        p_e = self._get_p_e(x, feature_id, edge_weight, p_e_of_feature_ancestor, feature_threshold, went_left)
+
+        # the node had an edge before, so we need to update the summary polynomial
         if node_id is not self.root_node_id:
-            # get the edge information with the node as the head
-            parent_id = self.parents[node_id]
-            feature_id = self.features[parent_id]
-            feature_threshold = self.thresholds[parent_id]
-            edge_weight = self.sample_weights[node_id]
-
-            # get weight of the edge (without ancestors)
-            p_e = self._get_p_e(x, feature_id, edge_weight, feature_path_weights, feature_threshold, went_left)
             path_summary_poly = path_summary_poly * Polynomial([p_e, 1])
-
             # check weather the feature has been observed before in the path
             if seen_features[feature_id]:
-                # the value in feature_path_weights contains p_e of an ancestor
-                p_e_of_feature_ancestors[node_id] = feature_path_weights[feature_id].copy()
-                height_of_feature_ancestors[node_id] = feature_path_depths[feature_id].copy()
-                #divide by p_e_ancestor
-                path_summary_poly = Polynomial(polydiv(path_summary_poly.coef,Polynomial([feature_path_weights[feature_id],1]).coef)[0])
+                p_e_ancestor = p_e_of_feature_ancestor[feature_id]
+                path_summary_poly = Polynomial(
+                    polydiv(path_summary_poly.coef, Polynomial([p_e_ancestor, 1]).coef)[0]
+                )
 
             #store previous feature info
-            seen_features[feature_id] = True
-            feature_path_weights[feature_id] = p_e
-            feature_path_depths[feature_id] = path_summary_poly.degree()
+            #seen_features[feature_id] = True
+            p_e_of_feature_ancestor[feature_id] = p_e
+            seen_features_degree[feature_id] = path_summary_poly.degree()
 
+            # if node is a leaf (base case of the recursion)
+            if self.leaf_mask[node_id]:
+                leaf_prediction = self.leaf_predictions[node_id]
+                leaf_prediction *= self.probabilities[node_id]
+                self.summary_polynomials[node_id] = path_summary_poly * leaf_prediction
 
+        # if the node is a decision node then we continue the recursion down the tree
+        if self.node_mask[node_id]:
+            seen_features_input = seen_features.copy()
+            seen_features_input[feature_id] = True
 
-        # if node is a leaf (base case of the recursion)
-        if self.leaf_mask[node_id]:
-            # TODO probably need to do something with the ancestor as well here
-            leaf_prediction = self.leaf_predictions[node_id]
-            leaf_prediction *= self.probabilities[node_id]
-            self.summary_polynomials[node_id] = path_summary_poly * leaf_prediction
+            #p_e_of_feature_ancestor_input = p_e_of_feature_ancestor.copy()
+            #p_e_of_feature_ancestor_input[feature_id] = p_e
 
-        else:
-            #continue recursion
-            left_child_id, right_child_id = self.children_left[node_id], self.children_right[
-                node_id]
+            #seen_features_degree_input = seen_features_degree.copy()
+            #seen_features_degree_input[feature_id] = path_summary_poly.degree()
 
+            left_child_id = self.children_left[node_id]
             self._compute_shapley_values(
                 x=x,
                 node_id=left_child_id,
                 path_summary_poly=path_summary_poly.copy(),
-                feature_path_weights=feature_path_weights.copy(),
+                p_e_of_feature_ancestor=p_e_of_feature_ancestor,
                 depth_in_tree=depth_in_tree + 1,
-                seen_features=seen_features.copy(),
+                seen_features=seen_features_input,
                 went_left=True,
-                feature_path_depths=feature_path_depths.copy(),
-                height_of_feature_ancestors=height_of_feature_ancestors,
-                p_e_of_feature_ancestors=p_e_of_feature_ancestors
+                seen_features_degree=seen_features_degree,
+                #height_of_feature_ancestors=height_of_feature_ancestors,
+                #p_e_of_feature_ancestors=p_e_of_feature_ancestors
             )
+            right_child_id = self.children_right[node_id]
             self._compute_shapley_values(
                 x=x,
                 node_id=right_child_id,
                 path_summary_poly=path_summary_poly.copy(),
-                feature_path_weights=feature_path_weights.copy(),
+                p_e_of_feature_ancestor=p_e_of_feature_ancestor,
                 depth_in_tree=depth_in_tree + 1,
-                seen_features=seen_features.copy(),
+                seen_features=seen_features_input,
                 went_left=False,
-                feature_path_depths=feature_path_depths.copy(),
-                height_of_feature_ancestors=height_of_feature_ancestors,
-                p_e_of_feature_ancestors=p_e_of_feature_ancestors
+                seen_features_degree=seen_features_degree,
+                #height_of_feature_ancestors=height_of_feature_ancestors,
+                #p_e_of_feature_ancestors=p_e_of_feature_ancestors
             )
-
             # add the summary polynomials of the left and right child nodes together
             added_polynomial = self._special_polynomial_addition(
-                p1=self.summary_polynomials[left_child_id].copy(),
-                p2=self.summary_polynomials[right_child_id].copy()
+                p1=self.summary_polynomials[left_child_id],
+                p2=self.summary_polynomials[right_child_id]
             )
             # store the summary polynomial of the current node
-            self.summary_polynomials[node_id] = added_polynomial.copy()
+            self.summary_polynomials[node_id] = added_polynomial
 
-        #Update Shapley values
         if node_id is not self.root_node_id:
-            quotient = Polynomial(polydiv(self.summary_polynomials[node_id].coef, Polynomial([p_e, 1]).coef)[0])
+            # Update Shapley values
+            quotient = Polynomial(
+                polydiv(self.summary_polynomials[node_id].coef, Polynomial([p_e, 1]).coef)[0])
             psi = self._psi(quotient)
             self.shapley_values[feature_id] += (p_e - 1) * psi
 
-            # the part below is only needed if the feature was already encountered not in this example
-            if node_id in p_e_of_feature_ancestors:
-                p_e_ancestor = p_e_of_feature_ancestors[node_id]
-                #maybe mistake in paper?
-                #psi_factor = Polynomial([1, 1]) ** (depth_in_tree-height_of_feature_ancestors[node_id])  # TODO could be wrong the max and 1 default
-                psi_denominator = Polynomial([p_e_ancestor, 1])#*psi_factor
-                quotient_ancestor = Polynomial(polydiv(self.summary_polynomials[node_id].coef, psi_denominator.coef)[0])
-                psi_ancestor = self._psi(quotient_ancestor)
+            # the part below is only needed if the feature was already encountered in the path
+            if seen_features[feature_id]:
+                p_e_ancestor = p_e_of_feature_ancestor[feature_id]
+
+                degree_of_summary_poly = self.summary_polynomials[node_id].degree()
+                degree_of_ancestor = seen_features_degree[feature_id]
+
+                # get the numerator of psi
+                psi_numerator = self.summary_polynomials[node_id].coef
+                for i in range(degree_of_summary_poly - degree_of_ancestor):
+                    psi_numerator = polydiv(psi_numerator, Polynomial([1, 1]).coef)[0]
+
+                # get the denominator of psi
+                psi_denominator = Polynomial([p_e_ancestor, 1])
+
+                # get psi for ancestor
+                psi_quotient = Polynomial(polydiv(psi_numerator, psi_denominator.coef)[0])
+                psi_ancestor = self._psi(psi_quotient)
+
                 self.shapley_values[feature_id] -= (p_e_ancestor - 1) * psi_ancestor
 
-
+                # maybe mistake in paper?
+                #psi_factor = Polynomial([1, 1]) ** (degree_of_summary_poly - degree_of_ancestor)
+                #psi_factor = self.summary_polynomials[node_id] * psi_factor
+                #  # *psi_factor
+                #quotient_ancestor = Polynomial(
+                #    polydiv(psi_factor.coef, psi_denominator.coef)[0]
+                #)
+                #psi_ancestor = self._psi(quotient_ancestor)
+                #self.shapley_values[feature_id] -= (p_e_ancestor - 1) * psi_ancestor
 
     def _compute_summary_polynomials(
             self,
@@ -180,7 +205,6 @@ class LinearTreeSHAPExplainer:
             node_id: int,
             path_summary_poly: Polynomial,
             feature_path_weights: np.ndarray[float] = None,
-            depth_in_tree: int = 0,
             seen_features: np.ndarray[bool] = None,
             went_left: bool = True
     ):
@@ -198,69 +222,54 @@ class LinearTreeSHAPExplainer:
                 node to the current node.
             feature_path_weights (np.ndarray[float], optional): The current feature path weights
                 in the path from the root node to the current node. Defaults to None.
-            depth_in_tree (int, optional): The height of the current node in the tree.
-                Defaults to 0.
             seen_features (np.ndarray[bool], optional): Whether a feature has been seen in the
                 path from the root node to the current node. Defaults to None.
             went_left (bool, optional): Whether the current node was reached by going left or right
                 from the parent node. Defaults to True (i.e. left).
         """
-        # is used to store weight information for this path per feature
+        # is used to store weight information for this path per feature in constant space
         if feature_path_weights is None:
-            feature_path_weights: np.ndarray = np.ones(self.n_features, dtype=float)
+            feature_path_weights: np.ndarray[float] = np.ones(self.n_features, dtype=float)
 
+        # is used to store if we observed a feature in the path in constant space
         if seen_features is None:
-            seen_features: np.ndarray = np.zeros(self.n_features, dtype=bool)
+            seen_features: np.ndarray[bool] = np.zeros(self.n_features, dtype=bool)
 
-        # if node is a leaf (base case of the recursion)
-        if self.leaf_mask[node_id]:
-
-            # TODO refactor this such that we always do this without the weird if-else
-
+        if node_id is not self.root_node_id:
+            # get the edge information with the node as the head
             parent_id = self.parents[node_id]
             feature_id = self.features[parent_id]
             feature_threshold = self.thresholds[parent_id]
             edge_weight = self.sample_weights[node_id]
+
+            # get factor p_e of the edge
             p_e = self._get_p_e(x, feature_id, edge_weight, feature_path_weights, feature_threshold, went_left)
             path_summary_poly = path_summary_poly * Polynomial([p_e, 1])
-            # TODO probably need to do something with the ancestor as well here
 
-            leaf_prediction = self.leaf_predictions[node_id]
-            leaf_prediction *= self.probabilities[node_id]
-            self.summary_polynomials[node_id] = path_summary_poly * leaf_prediction
-        else:  # node is not a leaf, and we traverse the tree (recursion case)
-            # if node is not the root node then there is an edge with a feature here
-            if node_id is not self.root_node_id:
+            # check weather the feature has been observed before in the path
+            if seen_features[feature_id]:
+                # the value in feature_path_weights contains p_e of an ancestor
+                p_e_ancestor = feature_path_weights[feature_id]
+                quotient_polynomial = Polynomial(polydiv(path_summary_poly.coef, Polynomial([p_e_ancestor, 1]).coef)[0])
+                path_summary_poly = quotient_polynomial
 
-                # get the edge information with the node as the head
-                parent_id = self.parents[node_id]
-                feature_id = self.features[parent_id]
-                feature_threshold = self.thresholds[parent_id]
-                edge_weight = self.sample_weights[node_id]
+            seen_features[feature_id] = True
+            feature_path_weights[feature_id] = p_e
 
-                # get weight of the edge
-                p_e = self._get_p_e(x, feature_id, edge_weight, feature_path_weights, feature_threshold, went_left)
-                path_summary_poly = path_summary_poly * Polynomial([p_e, 1])
+            # if the current node is a leaf node, scale the summary polynomial with the leaf output
+            if self.leaf_mask[node_id]:
+                leaf_prediction = self.leaf_predictions[node_id]
+                leaf_prediction *= self.probabilities[node_id]
+                self.summary_polynomials[node_id] = path_summary_poly * leaf_prediction
 
-                # check weather the feature has been observed before in the path
-                if seen_features[feature_id]:
-                    # the value in feature_path_weights contains p_e of an ancestor
-                    p_e_ancestor = feature_path_weights[feature_id]
-                    quotient_polynomial = Polynomial(polydiv(path_summary_poly.coef, Polynomial([p_e_ancestor, 1]).coef)[0])
-                    path_summary_poly = quotient_polynomial
-                else:
-                    seen_features[feature_id] = True
-                feature_path_weights[feature_id] = p_e
-
-            # compute the summary polynomials for the left and right child nodes
-            left_child_id, right_child_id = self.children_left[node_id], self.children_right[
-                node_id]
+        # compute the summary polynomials for the left and right child nodes
+        left_child_id, right_child_id = self.children_left[node_id], self.children_right[node_id]
+        if self.node_mask[node_id]:  # if the node is not a leaf node (recursion stop condition)
             self._compute_summary_polynomials(
                 x=x,
                 node_id=left_child_id,
                 path_summary_poly=path_summary_poly.copy(),
                 feature_path_weights=feature_path_weights.copy(),
-                depth_in_tree=depth_in_tree + 1,
                 seen_features=seen_features.copy(),
                 went_left=True
             )
@@ -269,17 +278,16 @@ class LinearTreeSHAPExplainer:
                 node_id=right_child_id,
                 path_summary_poly=path_summary_poly.copy(),
                 feature_path_weights=feature_path_weights.copy(),
-                depth_in_tree=depth_in_tree + 1,
                 seen_features=seen_features.copy(),
                 went_left=False
             )
             # add the summary polynomials of the left and right child nodes together
             added_polynomial = self._special_polynomial_addition(
-                p1=self.summary_polynomials[left_child_id].copy(),
-                p2=self.summary_polynomials[right_child_id].copy()
+                p1=self.summary_polynomials[left_child_id],
+                p2=self.summary_polynomials[right_child_id]
             )
             # store the summary polynomial of the current node
-            self.summary_polynomials[node_id] = added_polynomial.copy()
+            self.summary_polynomials[node_id] = added_polynomial
 
     def _aggregate_shapley(
             self,
@@ -287,7 +295,7 @@ class LinearTreeSHAPExplainer:
             node_id: int,
             went_left: bool = None,
             depth_in_tree: int = 0,
-            height_of_feature_ancestors: np.ndarray = None,
+            height_of_feature_ancestors: np.ndarray[int] = None,
             feature_path_weights: np.ndarray[float] = None,
             seen_features: np.ndarray[bool] = None
     ):
@@ -308,13 +316,13 @@ class LinearTreeSHAPExplainer:
                 path from the root node to the current node. Defaults to None.
         """
         if feature_path_weights is None:
-            feature_path_weights: np.ndarray = np.ones(self.n_features, dtype=float)
+            feature_path_weights: np.ndarray[float] = np.ones(self.n_features, dtype=float)
 
         if height_of_feature_ancestors is None:
-            height_of_feature_ancestors: np.ndarray = np.full(self.n_features, -1, dtype=int)
+            height_of_feature_ancestors: np.ndarray[int] = np.full(self.n_features, -1, dtype=int)
 
         if seen_features is None:
-            seen_features: np.ndarray = np.zeros(self.n_features, dtype=bool)
+            seen_features: np.ndarray[bool] = np.zeros(self.n_features, dtype=bool)
 
         # if node has children (recursion case)
         if not self.leaf_mask[node_id]:
@@ -360,16 +368,16 @@ class LinearTreeSHAPExplainer:
                 height_of_ancestor = height_of_feature_ancestors[feature_id]
             else:
                 p_e_ancestor = 1
-                height_of_ancestor = 0  # TODO could be wrong
+                height_of_ancestor = 0
                 feature_path_weights[feature_id] = p_e
                 seen_features[feature_id] = True
                 height_of_feature_ancestors[feature_id] = depth_in_tree
 
-            quotient = Polynomial(polydiv(self.summary_polynomials[node_id].coef, Polynomial([p_e, 1]).coef)[0])
-            psi = self._psi(quotient)
-            self.shapley_values[feature_id] += (p_e - 1) * psi
+            quotient_pos = polydiv(self.summary_polynomials[node_id].coef, Polynomial([p_e, 1]).coef)[0]
+            quotient_pos = Polynomial(quotient_pos)
+            psi_pos = self._psi(quotient_pos)
+            self.shapley_values[feature_id] += (p_e - 1) * psi_pos
 
-            # TOOD ancestors are commented out atm
             # the part below is only needed if the feature was already encountered not in this example
             #psi_numerator = Polynomial([1, 1]) ** max((height_of_ancestor - depth_in_tree), 0)  # TODO could be wrong the max and 1 default
             #psi_numerator = self.summary_polynomials[node_id] * psi_numerator
@@ -478,7 +486,11 @@ class LinearTreeSHAPExplainer:
         parent_array[children_right[non_leaf_indices]] = np.where(non_leaf_indices)[0]
         return parent_array
 
-    def _get_conditional_sample_weights(self, sample_count: np.ndarray[int]) -> np.ndarray[float]:
+    @staticmethod
+    def _get_conditional_sample_weights(
+            sample_count: np.ndarray[int],
+            parent_array: np.ndarray[int],
+    ) -> np.ndarray[float]:
         """Get the conditional sample weights for the tree at each decision node.
 
         The conditional sample weights are the probabilities of going left or right at each decision
@@ -488,11 +500,12 @@ class LinearTreeSHAPExplainer:
 
         Args:
             sample_count (np.ndarray[int]): The count of the instances going through each node.
+            parent_array (np.ndarray[int]): The parent array denoting the id of the parent node for
+                each node in the tree. The parent of the root node is -1 or otherwise specified.
 
         Returns:
             np.ndarray[float]: The conditional sample weights of the nodes.
         """
-        parent_array = self.parents
         conditional_sample_weights = np.zeros_like(sample_count, dtype=float)
         conditional_sample_weights[0] = 1
         parent_sample_count = sample_count[parent_array[1:]]
@@ -502,7 +515,7 @@ class LinearTreeSHAPExplainer:
 
 if __name__ == "__main__":
     DO_TREE_SHAP = True
-    DO_PLOTTING = True
+    DO_PLOTTING = False
 
     from linear_interaction.utils import convert_tree
 
@@ -562,6 +575,7 @@ if __name__ == "__main__":
         print("TreeSHAP - SVs (obs.)    ", sv_tree_shap)
         print("TreeSHAP - sum SVs (obs.)", sv_tree_shap.sum() + explainer_shap.expected_value)
         print("TreeSHAP - time elapsed  ", time_elapsed)
+        print("TreeSHAP - empty pred    ", explainer_shap.expected_value)
 
     # LinearTreeSHAP -------------------------------------------------------------------------------
 
@@ -572,4 +586,4 @@ if __name__ == "__main__":
     print("Linear - SVs (obs.)      ", sv_linear_tree_shap)
     print("Linear - sum SVs (obs.)  ", sv_linear_tree_shap.sum() + explainer.empty_prediction)
     print("Linear - time elapsed    ", time_elapsed)
-    print("Linear - empty prediction", explainer.empty_prediction)
+    print("Linear - empty pred      ", explainer.empty_prediction)
