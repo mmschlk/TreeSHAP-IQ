@@ -140,8 +140,10 @@ def convert_tree(tree: Union[DecisionTreeRegressor, DecisionTreeClassifier]) -> 
     thresholds: np.ndarray[float] = tree.tree_.threshold  # -2 for leaf nodes
 
     sample_weights_tree = tree.tree_.weighted_n_node_samples
+
+    marginal_probabilities = sample_weights_tree / np.max(sample_weights_tree) # marginal probabilities of each node
     sample_weights: np.ndarray[float] = _get_conditional_sample_weights(sample_weights_tree, parents)
-    marginal_probabilities = sample_weights / np.max(sample_weights)  # marginal probabilities of each node
+
 
     leaf_predictions = tree.tree_.value.squeeze(axis=1).squeeze()
 
