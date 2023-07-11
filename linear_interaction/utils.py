@@ -65,6 +65,7 @@ def _recursively_copy_tree(
         children_left: np.ndarray[int],
         children_right: np.ndarray[int],
         features: np.ndarray[int],
+        n_features: int
 ) -> tuple[np.ndarray[int], np.ndarray[int]]:
     """Traverse the tree and recursively copy edge information from the tree. Get the feature
         ancestor nodes for each node in the tree. An ancestor node is the last observed node that
@@ -83,6 +84,7 @@ def _recursively_copy_tree(
 
     ancestor_nodes: np.ndarray[int] = np.full_like(children_left, -1, dtype=int)
     edge_heights: np.ndarray[int] = np.zeros(children_left.shape, dtype=int)
+
     max_tree_depth = 0
 
     def _recursive_search(
@@ -103,21 +105,20 @@ def _recursively_copy_tree(
             edge_height (int): The edge height of the current node.
         """
         feature_id = features[node_id]
-        if seen_features[feature_id]:
-            ancestor_nodes[node_id] = last_feature_nodes[feature_id]
-        else:
+        if feature_id > -2: #node is not a leaf
+            if seen_features[feature_id]:
+                ancestor_nodes[node_id] = last_feature_nodes[feature_id]
             seen_features[feature_id] = True
             last_feature_nodes[feature_id] = node_id
-        if children_left[node_id] != -1:  # not a leaf node
             edge_height_left = _recursive_search(children_left[node_id], seen_features.copy(), last_feature_nodes.copy())
             edge_height_right = _recursive_search(children_right[node_id], seen_features.copy(), last_feature_nodes.copy())
             edge_heights[node_id] = max(edge_height_left, edge_height_right)
         else:  # is a leaf node edge height corresponds to the number of features seen on the way
-            edge_heights[node_id] = sum(seen_features)
+            edge_heights[node_id] = sum(seen_features.copy())
         return edge_heights[node_id]
 
-    init_seen_features = np.zeros(features.shape, dtype=bool)
-    init_last_feature_nodes = np.full(features.shape, -1, dtype=int)
+    init_seen_features = np.zeros(n_features, dtype=bool)
+    init_last_feature_nodes = np.full(n_features, -1, dtype=int)
     _recursive_search(0, init_seen_features, init_last_feature_nodes)
     return ancestor_nodes, edge_heights
 
