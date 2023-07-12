@@ -1,6 +1,7 @@
 from typing import Union
 
 import numpy as np
+import itertools
 from collections import namedtuple
 try:
     from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
@@ -163,3 +164,26 @@ def convert_tree(tree: Union[DecisionTreeRegressor, DecisionTreeClassifier]) -> 
         ancestors=ancestors,
         edge_heights=edge_heights,
     )
+
+
+
+def powerset(iterable, min_size=-1, max_size=None):
+    """Return a powerset of the iterable with optional size limits.
+
+    Args:
+        iterable (iterable): Iterable.
+        min_size (int, optional): Minimum size of the subsets. Defaults to -1.
+        max_size (int, optional): Maximum size of the subsets. Defaults to None.
+
+    Returns:
+        iterable: Powerset of the iterable.
+    """
+    if max_size is None and min_size > -1:
+        max_size = min_size
+    s = list(iterable)
+    if max_size is None:
+        max_size = len(s)
+    else:
+        max_size = min(max_size, len(s))
+    return itertools.chain.from_iterable(
+        itertools.combinations(s, r) for r in range(max(min_size, 0), max_size + 1))

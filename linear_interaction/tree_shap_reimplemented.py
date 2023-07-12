@@ -1,7 +1,7 @@
 """This module contains the linear TreeSHAP class, which is a reimplementation of the original TreeSHAP algorithm."""
 import time
 
-from utils import tree_model, _recursively_copy_tree, _get_parent_array
+from utils import tree_model, _recursively_copy_tree, _get_parent_array, powerset
 
 from collections import namedtuple
 
@@ -72,9 +72,67 @@ class LinearTreeSHAPExplainer:
         #self.empty_prediction = self.probabilities * self.leaf_predictions
         self.empty_prediction: float = float(np.sum(self.leaf_predictions[self.leaf_mask]))
 
+    def explain_brute_force(self,x: np.ndarray):
+        self.shapley_values: np.ndarray = np.zeros(self.n_features, dtype=float)
+
+        #Evaluate model for every subset
+        counter_subsets = 0
+        subset_values = np.zeros(2**self.n_features)
+        position_lookup = {}
+        for S in powerset(range(self.n_features)):
+            subset_values[counter_subsets] = self._naive_shapley_recursion(x, S, 0, 1)
+            position_lookup[S] = counter_subsets
+            counter_subsets += 1
+        #Aggregate subsets for the shapley values / interactions
+        shapley_interactions, shapley_interactions_lookup = self._compute_shapley_from_subsets(subset_values, position_lookup,1)
+        print(shapley_interactions)
+        shapley_base = subset_values[position_lookup[()]]
+        return shapley_base, shapley_interactions, shapley_interactions_lookup
+
+
+    def _compute_shapley_from_subsets(self,subset_values,position_lookup,order: int =1):
+        features = range(self.n_features)
+        shapley_interactions = np.zeros(int(binom(self.n_features,order)))
+        shapley_interactions_lookup = {}
+        counter_interactions = 0
+        for S in powerset(features,order):
+            temp_values = 0
+            for T in powerset(set(features)-set(S)):
+                weight_T = 1/(binom(self.n_features-order,len(T))*(self.n_features-order+1))
+                for L in powerset(S):
+                    subset = tuple(sorted(L+T))
+                    pos = position_lookup[subset]
+                    temp_values += weight_T*(-1)**(order-len(L))*subset_values[pos]
+            shapley_interactions[counter_interactions] = temp_values
+            shapley_interactions_lookup[counter_interactions] = S
+            counter_interactions += 1
+        return shapley_interactions, shapley_interactions_lookup
+
+
+
+
+    def _naive_shapley_recursion(self, x: np.ndarray, S: tuple, node_id: int, weight: float):
+        threshold = self.thresholds[node_id]
+        feature_id = self.features[node_id]
+        if self.leaf_mask[node_id]:
+            return self.values[node_id]*weight
+        else:
+            if feature_id in S:
+                if x[feature_id] <= threshold:
+                    subset_val_left = self._naive_shapley_recursion(x, S, self.children_left[node_id], weight)
+                    subset_val_right = 0
+                else:
+                    subset_val_left = 0
+                    subset_val_right = self._naive_shapley_recursion(x, S, self.children_right[node_id], weight)
+            else:
+                subset_val_left = self._naive_shapley_recursion(x, S, self.children_left[node_id], weight*self.weights[self.children_left[node_id]])
+                subset_val_right = self._naive_shapley_recursion(x, S, self.children_right[node_id], weight*self.weights[self.children_right[node_id]])
+        return subset_val_left + subset_val_right
+
     def explain(self, x: np.ndarray):
         # get an array index by the nodes
         initial_polynomial = Polynomial([1.])
+        self.shapley_values: np.ndarray = np.zeros(self.n_features, dtype=float)
         #self._compute_summary_polynomials(x, self.root_node_id, initial_polynomial)
         self._compute_shapley_values(x, 0, initial_polynomial)
         # get an array indexed by the features
@@ -93,34 +151,33 @@ class LinearTreeSHAPExplainer:
         p_e_of_feature_ancestor: np.ndarray[float] = np.ones(self.n_features, dtype=float) if p_e_of_feature_ancestor is None else p_e_of_feature_ancestor
 
 
-        # get node / edge information
-        parent_id = self.parents[node_id]
-        feature_id = self.features[parent_id]
-        feature_threshold = self.thresholds[parent_id]
-        edge_weight = self.weights[node_id]
-
-        ancestor_node_id = self.ancestor_nodes[parent_id]
-        if ancestor_node_id>-1:
-            # if feature has an ancestor
-            p_e_ancestor = p_e_of_feature_ancestor[feature_id]
-            d_e_ancestor = self.edge_heights[ancestor_node_id]
-
-
-        p_e = self._get_p_e(x, feature_id, edge_weight, p_e_of_feature_ancestor, feature_threshold, went_left)
-        p_e_of_feature_ancestor[feature_id] = p_e
-
         # the node had an edge before, so we need to update the summary polynomial
         if node_id is not self.root_node_id:
+
+            # get node / edge information
+            parent_id = self.parents[node_id]
+            feature_id = self.features[parent_id]
+            feature_threshold = self.thresholds[parent_id]
+            edge_weight = self.weights[node_id]
+
+            ancestor_node_id = self.ancestor_nodes[parent_id]
+            if ancestor_node_id>-1:
+                # if feature has an ancestor
+                p_e_ancestor = p_e_of_feature_ancestor[feature_id]
+
+            p_e = self._get_p_e(x, feature_id, edge_weight, p_e_of_feature_ancestor, feature_threshold, went_left)
+            p_e_of_feature_ancestor[feature_id] = p_e
             path_summary_poly = path_summary_poly * Polynomial([p_e, 1])
+
             if ancestor_node_id > -1:
                 path_summary_poly = Polynomial(polydiv(path_summary_poly.coef,Polynomial([p_e_ancestor, 1]).coef)[0])
 
-            # if node is a leaf (base case of the recursion)
-            if self.leaf_mask[node_id]:
-                self.summary_polynomials[node_id] = path_summary_poly * self.leaf_predictions[node_id]
-
-        # if the node is a decision node then we continue the recursion down the tree
-        if self.children_left[node_id]>-1:
+        # if node is a leaf (base case of the recursion)
+        if self.leaf_mask[node_id]:
+            self.summary_polynomials[node_id] = path_summary_poly * self.leaf_predictions[node_id]
+        else:
+            # if the node is a decision node then we continue the recursion down the tree
+            #if self.children_left[node_id]>-1:
             left_child_id = self.children_left[node_id]
             self._compute_shapley_values(
                 x=x,
@@ -146,6 +203,7 @@ class LinearTreeSHAPExplainer:
             self.summary_polynomials[node_id] = added_polynomial
             #self.summary_polynomials_degree[node_id] = added_polynomial.degree()
 
+
         if node_id is not self.root_node_id:
             # Update Shapley values
             quotient = Polynomial(
@@ -155,9 +213,10 @@ class LinearTreeSHAPExplainer:
 
             # the part below is only needed if the feature was already encountered in the path
             if ancestor_node_id>-1:
-                d_e = self.edge_heights[node_id]
-                psi_factor = Polynomial([1, 1]) ** (d_e_ancestor - d_e)
-                psi_product = self.summary_polynomials[node_id]*psi_factor
+                d_e = self.edge_heights[parent_id]
+                d_e_ancestor = self.edge_heights[ancestor_node_id]
+                psi_factor = Polynomial([1, 1])**(d_e_ancestor - d_e)
+                psi_product = self.summary_polynomials[node_id]#*psi_factor
                 psi_denominator = Polynomial([p_e_ancestor, 1])
                 quotient_ancestor = Polynomial(polydiv(psi_product.coef, psi_denominator.coef)[0])
                 psi_ancestor = self._psi(quotient_ancestor)
@@ -187,15 +246,16 @@ class LinearTreeSHAPExplainer:
 
         # Use observations to compute weights (observational approach)
         weights: np.ndarray[float] = np.ones(children_left.shape, dtype=float)
-        leaf_predictions: np.ndarray[float] = np.ones(children_left.shape, dtype=float)
+        leaf_predictions: np.ndarray[float] = np.zeros(children_left.shape, dtype=float)
 
         if background_dataset is not None:
             # Use background dataset to compute weights (interventional approach)
             # TODO: process background_dataset to compute weights
             print("not yet implemented")
         else:
-            max_tree_depth = 0
 
+            max_tree_depth = 0
+            n_total_samples = node_sample_weight[0]
             def _recursive_compute(
                     node_id: int
             ):
@@ -214,13 +274,11 @@ class LinearTreeSHAPExplainer:
                 if children_left[node_id] > -1:  # not a leaf node
                     weights[children_left[node_id]] = node_sample_weight[children_left[node_id]] / node_sample_weight[
                         node_id]
-                    leaf_predictions[children_left[node_id]] = leaf_predictions[node_id] * weights[children_left[node_id]]
                     _recursive_compute(children_left[node_id])
                     weights[children_right[node_id]] = node_sample_weight[children_right[node_id]] / node_sample_weight[node_id]
-                    leaf_predictions[children_right[node_id]] = leaf_predictions[node_id] * weights[children_right[node_id]]
                     _recursive_compute(children_right[node_id])
                 else:  # is a leaf node multiply weights (R^v_\emptyset) by leaf_prediction
-                    leaf_predictions[node_id] = leaf_predictions[node_id]*values[node_id]
+                    leaf_predictions[node_id] = node_sample_weight[node_id]/n_total_samples*values[node_id]
             _recursive_compute(0)
         return weights, leaf_predictions
 
@@ -386,7 +444,7 @@ if __name__ == "__main__":
 
     if DO_PLOTTING:
         plt.figure(dpi=150)
-        plot_tree(clf)
+        plot_tree(clf,node_ids=True,proportion=True)
         plt.savefig("tree.pdf")
 
     # TreeSHAP -------------------------------------------------------------------------------------
@@ -426,3 +484,15 @@ if __name__ == "__main__":
     print("Linear - sum SVs (obs.)  ", sv_linear_tree_shap.sum() + explainer.empty_prediction)
     print("Linear - time elapsed    ", time_elapsed)
     print("Linear - empty pred      ", explainer.empty_prediction)
+
+
+    # Ground Truth Brute Force -------------------------------------------------------------------------------
+
+    start_time = time.time()
+    ground_truth_base, ground_truth_shap_int, ground_truth_shap_int_pos = explainer.explain_brute_force(x_input[0])
+    time_elapsed = time.time() - start_time
+
+    print("Ground Truth - SVs (obs.)      ", ground_truth_shap_int)
+    print("Ground Truth - sum SVs (obs.)  ", ground_truth_shap_int.sum() + ground_truth_base)
+    print("Ground Truth - time elapsed    ", time_elapsed)
+    print("Ground Truth - empty pred      ", ground_truth_base)
