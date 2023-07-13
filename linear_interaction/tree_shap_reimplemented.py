@@ -18,19 +18,15 @@ class LinearTreeSHAPExplainer:
         self.children_left: np.ndarray[int] = tree_model["children_left"]  # -1 for leaf nodes
         self.children_right: np.ndarray[int] = tree_model["children_right"]  # -1 for leaf nodes
         self.parents: np.ndarray[int] = _get_parent_array(self.children_left,self.children_right)  # -1 for the root node
-        #self.leaf_predictions = np.zeros(shape=self.children_left.shape, dtype=float)  # TODO remove this
-        #self.leaf_predictions[3] = 100.  # TODO remove this
-        #self.leaf_predictions: np.ndarray = tree_model.leaf_predictions  # can be zero for non-leaf nodes
         self.features: np.ndarray = tree_model["features"]  # -2 for leaf nodes
         self.thresholds: np.ndarray = tree_model["thresholds"]  # -2 for leaf nodes
-
         #not really needed
         self.node_sample_weight = tree_model["node_sample_weight"]
         self.values = tree_model["values"]
 
-
         self.ancestor_nodes, self.edge_heights = _recursively_copy_tree(self.children_left,
                                                                         self.children_right,
+                                                                        self.parents,
                                                                         self.features,
                                                                         n_features
                                                                         )
@@ -40,14 +36,6 @@ class LinearTreeSHAPExplainer:
                                                                                 self.node_sample_weight,
                                                                                 self.values
                                                                                 )
-
-        # conditional probabilities for each decision node
-        #sample_weights = self._get_conditional_sample_weights(tree_model.sample_weights)
-        #self.weights: np.ndarray = tree_model.weights  # in [0, 1] for all nodes
-        #self.edge_heights: np.ndarray = tree_model.edge_heights
-        # the marginal probabilities of the leaf nodes
-        #self.probabilities = tree_model.sample_weights / np.max(tree_model.sample_weights)
-
         # set the root node id and number of features
         self.root_node_id: int = root_node_id
         self.n_features: int = n_features
@@ -85,7 +73,6 @@ class LinearTreeSHAPExplainer:
             counter_subsets += 1
         #Aggregate subsets for the shapley values / interactions
         shapley_interactions, shapley_interactions_lookup = self._compute_shapley_from_subsets(subset_values, position_lookup,1)
-        print(shapley_interactions)
         shapley_base = subset_values[position_lookup[()]]
         return shapley_base, shapley_interactions, shapley_interactions_lookup
 
@@ -107,9 +94,6 @@ class LinearTreeSHAPExplainer:
             shapley_interactions_lookup[counter_interactions] = S
             counter_interactions += 1
         return shapley_interactions, shapley_interactions_lookup
-
-
-
 
     def _naive_shapley_recursion(self, x: np.ndarray, S: tuple, node_id: int, weight: float):
         threshold = self.thresholds[node_id]
@@ -133,10 +117,8 @@ class LinearTreeSHAPExplainer:
         # get an array index by the nodes
         initial_polynomial = Polynomial([1.])
         self.shapley_values: np.ndarray = np.zeros(self.n_features, dtype=float)
-        #self._compute_summary_polynomials(x, self.root_node_id, initial_polynomial)
         self._compute_shapley_values(x, 0, initial_polynomial)
         # get an array indexed by the features
-        #self._aggregate_shapley(x, self.root_node_id)
         return self.shapley_values.copy()
 
     def _compute_shapley_values(
@@ -150,17 +132,15 @@ class LinearTreeSHAPExplainer:
         # to store the p_e(x) of the feature ancestors when the feature was seen last in the path
         p_e_of_feature_ancestor: np.ndarray[float] = np.ones(self.n_features, dtype=float) if p_e_of_feature_ancestor is None else p_e_of_feature_ancestor
 
-
         # the node had an edge before, so we need to update the summary polynomial
         if node_id is not self.root_node_id:
-
             # get node / edge information
             parent_id = self.parents[node_id]
             feature_id = self.features[parent_id]
             feature_threshold = self.thresholds[parent_id]
             edge_weight = self.weights[node_id]
 
-            ancestor_node_id = self.ancestor_nodes[parent_id]
+            ancestor_node_id = self.ancestor_nodes[node_id]
             if ancestor_node_id>-1:
                 # if feature has an ancestor
                 p_e_ancestor = p_e_of_feature_ancestor[feature_id]
@@ -213,10 +193,10 @@ class LinearTreeSHAPExplainer:
 
             # the part below is only needed if the feature was already encountered in the path
             if ancestor_node_id>-1:
-                d_e = self.edge_heights[parent_id]
-                d_e_ancestor = self.edge_heights[ancestor_node_id]
+                d_e = self.edge_heights[node_id]
+                d_e_ancestor = self.edge_heights[self.ancestor_nodes[node_id]]
                 psi_factor = Polynomial([1, 1])**(d_e_ancestor - d_e)
-                psi_product = self.summary_polynomials[node_id]#*psi_factor
+                psi_product = self.summary_polynomials[node_id]*psi_factor
                 psi_denominator = Polynomial([p_e_ancestor, 1])
                 quotient_ancestor = Polynomial(polydiv(psi_product.coef, psi_denominator.coef)[0])
                 psi_ancestor = self._psi(quotient_ancestor)
@@ -434,7 +414,7 @@ if __name__ == "__main__":
 
     # create dummy regression dataset and fit tree model
     X, y = make_regression(1000, n_features=10, random_state=random_seed)
-    clf = DecisionTreeRegressor(max_depth=5, random_state=random_seed).fit(X, y)
+    clf = DecisionTreeRegressor(max_depth=25, random_state=random_seed).fit(X, y)
 
     # convert the tree to be usable like in TreeSHAP
     #tree_model = convert_tree(clf)
