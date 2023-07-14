@@ -130,7 +130,7 @@ class LinearTreeSHAPExplainer:
                 subset_val_right = self._naive_shapley_recursion(x, S, self.children_right[node_id], weight*self.weights[self.children_right[node_id]])
         return subset_val_left + subset_val_right
 
-    def explain(self, x: np.ndarray, order: int = 2):
+    def explain(self, x: np.ndarray, order: int = 1):
         # get an array index by the nodes
         initial_polynomial = Polynomial([1.])
         #Stores interactions
@@ -532,8 +532,8 @@ class LinearTreeSHAPExplainer:
 
 if __name__ == "__main__":
     DO_TREE_SHAP = True
-    DO_PLOTTING = False
-    DO_OBSERVATIONAL = False
+    DO_PLOTTING = True
+    DO_OBSERVATIONAL = True
 
     from linear_interaction.utils import convert_tree
 
@@ -555,7 +555,7 @@ if __name__ == "__main__":
 
     # create dummy regression dataset and fit tree model
     X, y = make_regression(1000, n_features=10, random_state=random_seed)
-    clf = DecisionTreeRegressor(max_depth=3, random_state=random_seed).fit(X, y)
+    clf = DecisionTreeRegressor(max_depth=5, random_state=random_seed).fit(X, y)
 
     # convert the tree to be usable like in TreeSHAP
     # tree_model = convert_tree(clf)
@@ -570,6 +570,19 @@ if __name__ == "__main__":
 
     # TreeSHAP -------------------------------------------------------------------------------------
 
+    my_thresholds = clf.tree_.threshold.copy()
+    #my_thresholds[32] = 0.5
+
+    my_features = clf.tree_.feature.copy()
+    #my_features[0] = 8
+    #my_features[32] = 6
+    #my_features[26] = 8
+    #my_features[33] = 8
+    #my_features[33] = 8
+    #my_features[48] = 1
+    #my_features[57] = 4
+    #my_features[35] = 7
+
     tree_dict = {
         "children_left": clf.tree_.children_left.copy(),
         "children_right": clf.tree_.children_right.copy(),
@@ -580,6 +593,16 @@ if __name__ == "__main__":
         "node_sample_weight": clf.tree_.weighted_n_node_samples.copy(),
     }
 
+    tree_dict = {
+        "children_left": clf.tree_.children_left.copy(),
+        "children_right": clf.tree_.children_right.copy(),
+        "children_default": clf.tree_.children_left.copy(),
+        "features": my_features,
+        "thresholds": my_thresholds,
+        "values": clf.tree_.value.reshape(-1, 1).copy(),
+        "node_sample_weight": clf.tree_.weighted_n_node_samples.copy()
+    }
+
     model = {
         "trees": [tree_dict]
     }
@@ -588,7 +611,7 @@ if __name__ == "__main__":
         # explain the tree with observational TreeSHAP
         start_time = time.time()
         if DO_OBSERVATIONAL:
-            explainer_shap = TreeExplainer(model, feature_perturbation="tree_path_dependent", data=X)
+            explainer_shap = TreeExplainer(model, feature_perturbation="tree_path_dependent")
         else:
             explainer_shap = TreeExplainer(model, feature_perturbation="interventional", data=X)
 
@@ -608,7 +631,7 @@ if __name__ == "__main__":
     explainer = LinearTreeSHAPExplainer(
         tree_model=tree_dict, n_features=x_input.shape[1], observational=DO_OBSERVATIONAL, background_dataset=X
     )
-    sv_linear_tree_shap = explainer.explain(x_input[0], 1)
+    sv_linear_tree_shap = explainer.explain(x_input[0], 2)
     time_elapsed = time.time() - start_time
 
     print("Linear")
@@ -635,3 +658,11 @@ if __name__ == "__main__":
         print(f"GT - order {order} SIs         ", ground_truth_shap_int[order])
         print(f"GT - order {order} sum SIs     ", ground_truth_shap_int[order].sum())
         print()
+
+
+
+
+    #debug order =2
+    mismatch = np.where((ground_truth_shap_int[2] - sv_linear_tree_shap) ** 2 > 0.001)
+    for key in mismatch[0]:
+        print(ground_truth_shap_int_pos[2][key])
