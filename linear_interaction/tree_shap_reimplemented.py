@@ -10,6 +10,7 @@ from numpy.polynomial import Polynomial
 from numpy.polynomial.polynomial import polydiv, polymul
 from scipy.special import binom
 
+from copy import deepcopy
 
 class LinearTreeSHAPExplainer:
 
@@ -121,11 +122,9 @@ class LinearTreeSHAPExplainer:
                 subset_val_right = self._naive_shapley_recursion(x, S, self.children_right[node_id], weight*self.weights[self.children_right[node_id]])
         return subset_val_left + subset_val_right
 
-    def explain(self, x: np.ndarray, order: int = 1):
+    def explain(self, x: np.ndarray, order: int = 2):
         # get an array index by the nodes
         initial_polynomial = Polynomial([1.])
-
-
         #Stores interactions
         self.shapley_interactions: np.ndarray = np.zeros(int(binom(self.n_features,order)), dtype=float)
         #Stores position of interactions
@@ -136,20 +135,42 @@ class LinearTreeSHAPExplainer:
             counter_interaction += 1
 
         #Stores position of interactions that include feature i
+        self.subset_updates_pos = {}
+        #Stores interactions that include feature i
         self.subset_updates = {}
         for i in range(self.n_features):
-            positions = np.zeros(int(binom(self.n_features-1,order-1)))
+            subsets = []
+            positions = np.zeros(int(binom(self.n_features-1,order-1)),dtype=int)
             pos_counter = 0
             for S in powerset(range(self.n_features),min_size=order,max_size=order):
                 if i in S:
                     positions[pos_counter] = self.shapley_interactions_lookup[S]
+                    subsets.append(S)
                     pos_counter += 1
-            self.subset_updates[i] = positions
+            self.subset_updates_pos[i] = positions
+            self.subset_updates[i] = subsets
 
 
         self._compute_shapley_values(x, 0, initial_polynomial,order)
         # get an array indexed by the features
         return self.shapley_interactions.copy()
+
+    def _compute_poly_interaction(self,S, p_e_values):
+        #Computes Q_S (interaction polynomial) given p_e values
+        poly_interaction = Polynomial([1.])
+        for i in S:
+            poly_interaction = poly_interaction * Polynomial([p_e_values[i], 1])
+        return poly_interaction
+
+    def _compute_p_e_interaction(self,S, p_e_values):
+        #Computes q_S (interaction factor) given p_e values
+        p_e_interaction = 0
+        for L in powerset(set(S)):
+            p_e_prod = 1
+            for j in L:
+                p_e_prod *= p_e_values[j]
+            p_e_interaction += (-1) ** (len(S) - len(L)) * p_e_prod
+        return p_e_interaction
 
     def _compute_shapley_values(
             self,
@@ -157,15 +178,15 @@ class LinearTreeSHAPExplainer:
             node_id: int,
             path_summary_poly: Polynomial,
             order: int,
-            p_e_of_feature_ancestor: np.ndarray[float] = None,
+            #p_e_of_feature_ancestor: np.ndarray[float] = None,
             p_e_storage: np.ndarray[float] = None,
             went_left: bool = None,
     ):
         # to store the p_e(x) of the feature ancestors when the feature was seen last in the path
-        p_e_of_feature_ancestor: np.ndarray[float] = np.ones(self.n_features, dtype=float) if p_e_of_feature_ancestor is None else p_e_of_feature_ancestor
+        #p_e_of_feature_ancestor: np.ndarray[float] = np.ones(self.n_features, dtype=float) if p_e_of_feature_ancestor is None else p_e_of_feature_ancestor
+
         # to store the p_e(x) of the features
         p_e_storage: np.ndarray[float] = np.ones(self.n_features, dtype=float) if p_e_storage is None else p_e_storage
-
 
         # the node had an edge before, so we need to update the summary polynomial
         if node_id is not self.root_node_id:
@@ -175,19 +196,25 @@ class LinearTreeSHAPExplainer:
             feature_threshold = self.thresholds[parent_id]
             edge_weight = self.weights[node_id]
 
+            #Polynomial correction if feature_id has been observed before (has an ancestor)
             ancestor_node_id = self.ancestor_nodes[node_id]
             if ancestor_node_id>-1:
                 # if feature has an ancestor
-                p_e_ancestor = p_e_of_feature_ancestor[feature_id]
-                p_e_ancestor_storage = p_e_of_feature_ancestor.copy()
+                #p_e_ancestor = p_e_storage[feature_id]
+                #backup ancestor p_e for updates of shapley interactions
+                p_e_ancestor_storage = p_e_storage.copy()
+                #Remove previous polynomial factor, to extend with current updated factor
+                path_summary_poly = Polynomial(polydiv(path_summary_poly.coef, Polynomial([p_e_ancestor_storage[feature_id], 1]).coef)[0])
 
-            p_e = self._get_p_e(x, feature_id, edge_weight, p_e_of_feature_ancestor, feature_threshold, went_left)
-            p_e_storage[feature_id] = p_e
-            p_e_of_feature_ancestor[feature_id] = p_e
-            path_summary_poly = path_summary_poly * Polynomial([p_e, 1])
+            #Compute current p_e, i.e. update from previous for this feature_id
+            p_e_current = self._get_p_e(x, feature_id, edge_weight, p_e_storage[feature_id], feature_threshold, went_left)
+            #Update stored p_e values
+            p_e_storage[feature_id] = p_e_current
 
-            if ancestor_node_id > -1:
-                path_summary_poly = Polynomial(polydiv(path_summary_poly.coef,Polynomial([p_e_ancestor, 1]).coef)[0])
+            #Extend summary polynomial
+            path_summary_poly = path_summary_poly * Polynomial([p_e_current, 1])
+            #set ancestor information to current feature information
+            #p_e_of_feature_ancestor[feature_id] = p_e_storage.copy()
 
         # if node is a leaf (base case of the recursion)
         if self.leaf_mask[node_id]:
@@ -201,7 +228,7 @@ class LinearTreeSHAPExplainer:
                 node_id=left_child_id,
                 path_summary_poly=path_summary_poly,
                 order = order,
-                p_e_of_feature_ancestor=p_e_of_feature_ancestor.copy(),
+                #p_e_of_feature_ancestor=p_e_of_feature_ancestor.copy(),
                 p_e_storage = p_e_storage.copy(),
                 went_left=True,
             )
@@ -211,7 +238,7 @@ class LinearTreeSHAPExplainer:
                 node_id=right_child_id,
                 path_summary_poly=path_summary_poly,
                 order = order,
-                p_e_of_feature_ancestor=p_e_of_feature_ancestor.copy(),
+                #p_e_of_feature_ancestor=p_e_of_feature_ancestor.copy(),
                 p_e_storage = p_e_storage.copy(),
                 went_left=False,
             )
@@ -226,28 +253,32 @@ class LinearTreeSHAPExplainer:
 
 
         if node_id is not self.root_node_id:
-
-            N = set(range(self.n_features))
-            N_minus_feature = N - {feature_id}
-
-            for S in powerset(N_minus_feature,min_size=order-1,max_size=order-1):
-                S_plus_feature = tuple(sorted(S+(feature_id,)))
-                S_pos = self.shapley_interactions_lookup[S_plus_feature]
-                poly_denom = Polynomial([1.])
-                for i in S_plus_feature:
-                    poly_denom = poly_denom*Polynomial([p_e_storage[feature_id],1])
+            q_S = {}
+            Q_S = {}
+            Q_S_ancestor = {}
+            q_S_ancestor = {}
+            for pos,S in zip(self.subset_updates_pos[feature_id],self.subset_updates[feature_id]):
+            #for S in self.shapley_interactions_lookup:
+                #Update interactions for every interactions that contains feature_id
+                #Compute interaction factor and polynomial for aggregation below
+                q_S[S] = self._compute_p_e_interaction(S, p_e_storage)
+                Q_S[S] = self._compute_poly_interaction(S, p_e_storage)
+                #Update interactions for every interactions that contains feature_id
                 quotient = Polynomial(
-                    polydiv(self.summary_polynomials[node_id].coef, poly_denom.coef)[0])
+                    polydiv(self.summary_polynomials[node_id].coef, Q_S[S].coef)[0])
                 psi = self._psi(quotient)
+                self.shapley_interactions[pos] += q_S[S] * psi
 
-                S_p_e = 0
-                for L in powerset(set(S_plus_feature)):
-                    p_e_prod = 1
-                    for j in L:
-                        p_e_prod *= p_e_storage[j]
-                    S_p_e += (-1)**(order-len(L))*p_e_prod
-                self.shapley_interactions[S_pos] += (S_p_e) * psi
-
+                if ancestor_node_id > -1:
+                    q_S_ancestor[S] = self._compute_p_e_interaction(S, p_e_ancestor_storage)
+                    Q_S_ancestor[S] = self._compute_poly_interaction(S, p_e_ancestor_storage)
+                    d_e = self.edge_heights[node_id]
+                    d_e_ancestor = self.edge_heights[self.ancestor_nodes[node_id]]
+                    psi_factor = Polynomial([1, 1]) ** (d_e_ancestor - d_e)
+                    psi_product = self.summary_polynomials[node_id] * psi_factor
+                    quotient_ancestor = Polynomial(polydiv(psi_product.coef, Q_S_ancestor[S].coef)[0])
+                    psi_ancestor = self._psi(quotient_ancestor)
+                    self.shapley_interactions[pos] -= q_S_ancestor[S] * psi_ancestor
 
             # Update Shapley values
             #quotient = Polynomial(
@@ -256,15 +287,15 @@ class LinearTreeSHAPExplainer:
             #self.shapley_interactions[feature_id] += (p_e - 1) * psi
 
             # the part below is only needed if the feature was already encountered in the path
-            if ancestor_node_id>-1:
-                d_e = self.edge_heights[node_id]
-                d_e_ancestor = self.edge_heights[self.ancestor_nodes[node_id]]
-                psi_factor = Polynomial([1, 1])**(d_e_ancestor - d_e)
-                psi_product = self.summary_polynomials[node_id]*psi_factor
-                psi_denominator = Polynomial([p_e_ancestor, 1])
-                quotient_ancestor = Polynomial(polydiv(psi_product.coef, psi_denominator.coef)[0])
-                psi_ancestor = self._psi(quotient_ancestor)
-                self.shapley_interactions[feature_id] -= (p_e_ancestor - 1) * psi_ancestor
+            #if ancestor_node_id>-1:
+            #    d_e = self.edge_heights[node_id]
+            #    d_e_ancestor = self.edge_heights[self.ancestor_nodes[node_id]]
+            #    psi_factor = Polynomial([1, 1])**(d_e_ancestor - d_e)
+            #    psi_product = self.summary_polynomials[node_id]*psi_factor
+            #    psi_denominator = Polynomial([p_e_ancestor, 1])
+            #   quotient_ancestor = Polynomial(polydiv(psi_product.coef, psi_denominator.coef)[0])
+            #   psi_ancestor = self._psi(quotient_ancestor)
+            #   self.shapley_interactions[feature_id] -= (p_e_ancestor - 1) * psi_ancestor
 
     def _recursively_compute_weights(self,
             children_left: np.ndarray[int],
@@ -380,7 +411,7 @@ class LinearTreeSHAPExplainer:
             x: np.ndarray,
             feature_id: int,
             edge_weight: float,
-            p_e_of_feature_ancestor: np.ndarray[float],
+            p_e_previous: float,
             feature_threshold: int,
             went_left: bool
     ) -> float:
@@ -403,7 +434,7 @@ class LinearTreeSHAPExplainer:
         else:
             if x[feature_id] > feature_threshold:
                 activation = 1
-        p_e = p_e_of_feature_ancestor[feature_id] * 1 / edge_weight
+        p_e = p_e_previous * 1 / edge_weight
         return activation * p_e
 
     @staticmethod
@@ -522,7 +553,7 @@ if __name__ == "__main__":
 
     start_time = time.time()
     explainer = LinearTreeSHAPExplainer(tree_model=tree_dict, n_features=x_input.shape[1])
-    sv_linear_tree_shap = explainer.explain(x_input[0],1)
+    sv_linear_tree_shap = explainer.explain(x_input[0])
     time_elapsed = time.time() - start_time
     print("Linear - SVs (obs.)      ", sv_linear_tree_shap)
     print("Linear - sum SVs (obs.)  ", sv_linear_tree_shap.sum() + explainer.empty_prediction)
@@ -543,3 +574,4 @@ if __name__ == "__main__":
         print("Ground Truth - sum   ", ground_truth_shap_int[order].sum())
 
 
+    #print(np.sum((ground_truth_shap_int[2]-sv_linear_tree_shap)**2))
