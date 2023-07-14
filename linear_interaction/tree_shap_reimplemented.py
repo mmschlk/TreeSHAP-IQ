@@ -1,7 +1,8 @@
 """This module contains the linear TreeSHAP class, which is a reimplementation of the original TreeSHAP algorithm."""
 import time
 
-from utils import tree_model, _recursively_copy_tree, _get_parent_array, powerset
+from utils import tree_model, _recursively_copy_tree, _get_parent_array, powerset, \
+    _get_conditional_sample_weights
 
 from collections import namedtuple
 
@@ -14,43 +15,50 @@ from copy import deepcopy
 
 class LinearTreeSHAPExplainer:
 
-    def __init__(self, tree_model: dict, n_features: int = None, root_node_id: int = 0):
+    def __init__(
+            self,
+            tree_model: dict,
+            observational: bool = True,
+            background_dataset: np.ndarray = None,
+            n_features: int = None,
+            root_node_id: int = 0
+    ):
         # get the node attributes from the tree_model definition
         self.children_left: np.ndarray[int] = tree_model["children_left"]  # -1 for leaf nodes
         self.children_right: np.ndarray[int] = tree_model["children_right"]  # -1 for leaf nodes
-        self.parents: np.ndarray[int] = _get_parent_array(self.children_left,self.children_right)  # -1 for the root node
+        self.parents: np.ndarray[int] = _get_parent_array(self.children_left,
+                                                          self.children_right)  # -1 for the root node
         self.features: np.ndarray = tree_model["features"]  # -2 for leaf nodes
         self.thresholds: np.ndarray = tree_model["thresholds"]  # -2 for leaf nodes
-        #not really needed
-        self.node_sample_weight = tree_model["node_sample_weight"]
-        self.values = tree_model["values"]
 
-        self.ancestor_nodes, self.edge_heights = _recursively_copy_tree(self.children_left,
-                                                                        self.children_right,
-                                                                        self.parents,
-                                                                        self.features,
-                                                                        n_features
-                                                                        )
+        # get the number of nodes and the node ids
+        self.n_nodes: int = len(self.children_left)
+        self.nodes: np.ndarray = np.arange(self.n_nodes)
+        # get the leaf and node masks
+        self.leaf_mask: np.ndarray = self.children_left == -1
+        self.node_mask: np.ndarray = ~self.leaf_mask
 
-        self.weights, self.leaf_predictions = self._recursively_compute_weights(self.children_left,
-                                                                                self.children_right,
-                                                                                self.node_sample_weight,
-                                                                                self.values
-                                                                                )
         # set the root node id and number of features
         self.root_node_id: int = root_node_id
         self.n_features: int = n_features
         if n_features is None:
             self.n_features: int = len(np.unique(self.features))
 
+        self.values = tree_model["values"]
 
-        # get the number of nodes and the node ids
-        self.n_nodes: int = len(self.children_left)
-        self.nodes: np.ndarray = np.arange(self.n_nodes)
+        # get the observational or interventional sample weights
+        if observational:
+            self.node_sample_weight = tree_model["node_sample_weight"]
+            self.weights, self.leaf_predictions = self._recursively_compute_weights(
+                self.children_left, self.children_right, self.node_sample_weight, self.values)
+        else:
+            self.node_sample_weight = self._compute_interventional_node_sample_weights(background_dataset)
+            # TODO check if the leaf_pred are correct or incorporate TreeSHAP
+            self.weights, self.leaf_predictions = self._recursively_compute_interventional_weights(
+                self.children_left, self.children_right, self.node_sample_weight, self.values)
 
-        # get the leaf and node masks
-        self.leaf_mask: np.ndarray = self.children_left == -1
-        self.node_mask: np.ndarray = ~self.leaf_mask
+        self.ancestor_nodes, self.edge_heights = _recursively_copy_tree(
+            self.children_left, self.children_right, self.parents, self.features, self.n_features)
 
         # initialize an array to store the summary polynomials
         self.summary_polynomials: np.ndarray = np.empty(self.n_nodes, dtype=Polynomial)
@@ -198,7 +206,7 @@ class LinearTreeSHAPExplainer:
 
             #Polynomial correction if feature_id has been observed before (has an ancestor)
             ancestor_node_id = self.ancestor_nodes[node_id]
-            if ancestor_node_id>-1:
+            if ancestor_node_id > -1:
                 # if feature has an ancestor
                 #p_e_ancestor = p_e_storage[feature_id]
                 #backup ancestor p_e for updates of shapley interactions
@@ -297,12 +305,70 @@ class LinearTreeSHAPExplainer:
             #   psi_ancestor = self._psi(quotient_ancestor)
             #   self.shapley_interactions[feature_id] -= (p_e_ancestor - 1) * psi_ancestor
 
-    def _recursively_compute_weights(self,
+    def _compute_interventional_node_sample_weights(
+            self,
+            background_dataset: np.ndarray[float]
+    ) -> np.ndarray[float]:
+        """Computes the interventional sample weights with a background dataset of shape (n_samples,
+            n_features).
+
+         The interventional sample weights are computed by counting how many data points from the
+            background dataset go left and right at each decision node and thus reach either the
+            left or right child node.
+
+        Args:
+            background_dataset (np.ndarray[float]): A background dataset of shape (n_samples,
+                n_features).
+
+        Returns:
+            np.ndarray[int]: The interventional sample weights (split probabilities) for each node
+                in the tree.
+        """
+
+        active_edges: np.ndarray = np.zeros((background_dataset.shape[0], self.n_nodes), dtype=bool)
+        left_active = background_dataset[:, self.features[self.node_mask]] <= self.thresholds[self.node_mask]
+        active_edges[:, self.children_left[self.node_mask]] = left_active
+        right_active = background_dataset[:, self.features[self.node_mask]] > self.thresholds[self.node_mask]
+        active_edges[:, self.children_right[self.node_mask]] = right_active
+        active_edges[:, 0] = True
+        sample_count = np.sum(active_edges, axis=0)
+        sample_weights = sample_count / sample_count[0]
+        return sample_weights
+
+    @staticmethod
+    def _recursively_compute_interventional_weights(
+            children_left: np.ndarray[int],
+            children_right: np.ndarray[int],
+            node_sample_weight: np.ndarray[float],
+            values: np.ndarray[float]
+    ) -> tuple[np.ndarray[float], np.ndarray[float]]:
+
+        # Use observations to compute weights (observational approach)
+        weights: np.ndarray[float] = node_sample_weight.copy()
+        leaf_predictions: np.ndarray[float] = np.zeros(children_left.shape, dtype=float)
+        path_probabilities: np.ndarray[float] = np.zeros(children_left.shape, dtype=float)
+        path_probabilities[0] = 1.
+
+        def _recursive_compute(node_id: int):
+            """Recursively search for the ancestor node of the current node."""
+            if children_left[node_id] > -1:  # not a leaf node
+                path_probabilities[children_left[node_id]] = path_probabilities[node_id] * weights[children_left[node_id]]
+                _recursive_compute(children_left[node_id])
+                path_probabilities[children_right[node_id]] = path_probabilities[node_id] * weights[children_right[node_id]]
+                _recursive_compute(children_right[node_id])
+            else:  # is a leaf node multiply weights (R^v_\emptyset) by leaf_prediction
+                leaf_predictions[node_id] = path_probabilities[node_id] * values[node_id]
+
+        _recursive_compute(0)
+        return weights, leaf_predictions
+
+
+    @staticmethod
+    def _recursively_compute_weights(
             children_left: np.ndarray[int],
             children_right: np.ndarray[int],
             node_sample_weight: np.ndarray[int],
-            values: np.ndarray[float],
-            background_dataset: np.ndarray[float] = None
+            values: np.ndarray[float]
     ) -> tuple[np.ndarray[float], np.ndarray[float]]:
         """Traverse the tree and recursively copy edge information from the tree. Get the feature
             ancestor nodes for each node in the tree. An ancestor node is the last observed node that
@@ -312,7 +378,8 @@ class LinearTreeSHAPExplainer:
         Args:
             children_left (np.ndarray[int]): The left children of the tree. Leaf nodes are -1.
             children_right (np.ndarray[int]): The right children of the tree. Leaf nodes are -1.
-            features (np.ndarray[int]): The feature id of each node in the tree. Leaf nodes are -2.
+            node_sample_weight (np.ndarray[int]): The number of samples in each node.
+            values (np.ndarray[float]): The values of each node in the tree.
 
         Returns:
             ancestor_nodes (np.ndarray[int]): The ancestor nodes for each node in the tree.
@@ -322,42 +389,20 @@ class LinearTreeSHAPExplainer:
         # Use observations to compute weights (observational approach)
         weights: np.ndarray[float] = np.ones(children_left.shape, dtype=float)
         leaf_predictions: np.ndarray[float] = np.zeros(children_left.shape, dtype=float)
+        n_total_samples = node_sample_weight[0]
 
-        if background_dataset is not None:
-            # Use background dataset to compute weights (interventional approach)
-            # TODO: process background_dataset to compute weights
-            print("not yet implemented")
-        else:
+        def _recursive_compute(node_id: int):
+            """Recursively search for the ancestor node of the current node."""
+            if children_left[node_id] > -1:  # not a leaf node
+                weights[children_left[node_id]] = node_sample_weight[children_left[node_id]] / node_sample_weight[node_id]
+                _recursive_compute(children_left[node_id])
+                weights[children_right[node_id]] = node_sample_weight[children_right[node_id]] / node_sample_weight[node_id]
+                _recursive_compute(children_right[node_id])
+            else:  # is a leaf node multiply weights (R^v_\emptyset) by leaf_prediction
+                leaf_predictions[node_id] = node_sample_weight[node_id] / n_total_samples * values[node_id]
 
-            max_tree_depth = 0
-            n_total_samples = node_sample_weight[0]
-            def _recursive_compute(
-                    node_id: int
-            ):
-                """Recursively search for the ancestor node of the current node.
-
-                Args:
-                    node_id (int): The current node id.
-                    seen_features (np.ndarray[bool]): The boolean array denoting whether a feature has been
-                        seen in the path.
-                    last_feature_nodes (np.ndarray[int]): The last observed node that has the same feature
-                        as the current node in the path.
-
-                Returns:
-                    edge_height (int): The edge height of the current node.
-                """
-                if children_left[node_id] > -1:  # not a leaf node
-                    weights[children_left[node_id]] = node_sample_weight[children_left[node_id]] / node_sample_weight[
-                        node_id]
-                    _recursive_compute(children_left[node_id])
-                    weights[children_right[node_id]] = node_sample_weight[children_right[node_id]] / node_sample_weight[node_id]
-                    _recursive_compute(children_right[node_id])
-                else:  # is a leaf node multiply weights (R^v_\emptyset) by leaf_prediction
-                    leaf_predictions[node_id] = node_sample_weight[node_id]/n_total_samples*values[node_id]
-            _recursive_compute(0)
+        _recursive_compute(0)
         return weights, leaf_predictions
-
-
 
     @staticmethod
     def _get_binomial_polynomial(degree: int) -> Polynomial:
@@ -487,7 +532,8 @@ class LinearTreeSHAPExplainer:
 
 if __name__ == "__main__":
     DO_TREE_SHAP = True
-    DO_PLOTTING = True
+    DO_PLOTTING = False
+    DO_OBSERVATIONAL = False
 
     from linear_interaction.utils import convert_tree
 
@@ -509,17 +555,17 @@ if __name__ == "__main__":
 
     # create dummy regression dataset and fit tree model
     X, y = make_regression(1000, n_features=10, random_state=random_seed)
-    clf = DecisionTreeRegressor(max_depth=10, random_state=random_seed).fit(X, y)
+    clf = DecisionTreeRegressor(max_depth=3, random_state=random_seed).fit(X, y)
 
     # convert the tree to be usable like in TreeSHAP
-    #tree_model = convert_tree(clf)
+    # tree_model = convert_tree(clf)
 
     x_input = X[:1]
     print("Output f(x):", clf.predict(x_input)[0])
 
     if DO_PLOTTING:
         plt.figure(dpi=150)
-        plot_tree(clf,node_ids=True,proportion=True)
+        plot_tree(clf, node_ids=True, proportion=True)
         plt.savefig("tree.pdf")
 
     # TreeSHAP -------------------------------------------------------------------------------------
@@ -541,37 +587,51 @@ if __name__ == "__main__":
     if DO_TREE_SHAP:
         # explain the tree with observational TreeSHAP
         start_time = time.time()
-        explainer_shap = TreeExplainer(model, feature_perturbation="tree_path_dependent")
+        if DO_OBSERVATIONAL:
+            explainer_shap = TreeExplainer(model, feature_perturbation="tree_path_dependent", data=X)
+        else:
+            explainer_shap = TreeExplainer(model, feature_perturbation="interventional", data=X)
+
         sv_tree_shap = explainer_shap.shap_values(x_input)
         time_elapsed = time.time() - start_time
+
+        print("TreeSHAP")
+        print("TreeSHAP - time elapsed  ", time_elapsed)
         print("TreeSHAP - SVs (obs.)    ", sv_tree_shap)
         print("TreeSHAP - sum SVs (obs.)", sv_tree_shap.sum() + explainer_shap.expected_value)
-        print("TreeSHAP - time elapsed  ", time_elapsed)
         print("TreeSHAP - empty pred    ", explainer_shap.expected_value)
+        print()
 
     # LinearTreeSHAP -------------------------------------------------------------------------------
-
+    # explain the tree with LinearTreeSHAP
     start_time = time.time()
-    explainer = LinearTreeSHAPExplainer(tree_model=tree_dict, n_features=x_input.shape[1])
-    sv_linear_tree_shap = explainer.explain(x_input[0])
+    explainer = LinearTreeSHAPExplainer(
+        tree_model=tree_dict, n_features=x_input.shape[1], observational=DO_OBSERVATIONAL, background_dataset=X
+    )
+    sv_linear_tree_shap = explainer.explain(x_input[0], 1)
     time_elapsed = time.time() - start_time
+
+    print("Linear")
+    print("Linear - time elapsed    ", time_elapsed)
     print("Linear - SVs (obs.)      ", sv_linear_tree_shap)
     print("Linear - sum SVs (obs.)  ", sv_linear_tree_shap.sum() + explainer.empty_prediction)
     print("Linear - time elapsed    ", time_elapsed)
     print("Linear - empty pred      ", explainer.empty_prediction)
+    print()
 
-
-    # Ground Truth Brute Force -------------------------------------------------------------------------------
+    # Ground Truth Brute Force ---------------------------------------------------------------------
+    # compute the ground truth interactions with brute force
     max_order = 2
 
     start_time = time.time()
-    ground_truth_shap_int, ground_truth_shap_int_pos = explainer.explain_brute_force(x_input[0],max_order)
+    gt_results = explainer.explain_brute_force(x_input[0], max_order)
+    ground_truth_shap_int, ground_truth_shap_int_pos = gt_results
     time_elapsed = time.time() - start_time
-    print("Ground Truth - time elapsed    ", time_elapsed)
-    for order in range(max_order+1):
-        print("---------------order: ",order)
-        print("Ground Truth -       ", ground_truth_shap_int[order])
-        print("Ground Truth - sum   ", ground_truth_shap_int[order].sum())
 
-
-    #print(np.sum((ground_truth_shap_int[2]-sv_linear_tree_shap)**2))
+    print("Ground Truth")
+    print("GT - time elapsed        ", time_elapsed)
+    print()
+    for order in range(max_order + 1):
+        print(f"GT - order {order} SIs         ", ground_truth_shap_int[order])
+        print(f"GT - order {order} sum SIs     ", ground_truth_shap_int[order].sum())
+        print()

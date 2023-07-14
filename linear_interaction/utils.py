@@ -110,7 +110,7 @@ def _recursively_copy_tree(
             ancestor_nodes[node_id] = last_feature_nodes[feature_id]
         seen_features[feature_id] = True
         last_feature_nodes[feature_id] = node_id
-        if children_left[node_id] > -1: #node is not a leaf
+        if children_left[node_id] > -1:  # node is not a leaf
             edge_height_left = _recursive_search(children_left[node_id], seen_features.copy(), last_feature_nodes.copy())
             edge_height_right = _recursive_search(children_right[node_id], seen_features.copy(), last_feature_nodes.copy())
             edge_heights[node_id] = max(edge_height_left, edge_height_right)
