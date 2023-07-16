@@ -67,7 +67,8 @@ def _recursively_copy_tree(
         children_right: np.ndarray[int],
         parents: np.ndarray[int],
         features: np.ndarray[int],
-        n_features: int
+        n_features: int,
+        interaction_order: int
 ) -> tuple[np.ndarray[int], np.ndarray[int]]:
     """Traverse the tree and recursively copy edge information from the tree. Get the feature
         ancestor nodes for each node in the tree. An ancestor node is the last observed node that
@@ -84,8 +85,10 @@ def _recursively_copy_tree(
         edge_heights (np.ndarray[int]): The edge heights for each node in the tree.
     """
 
-    ancestor_nodes: np.ndarray[int] = np.full_like(children_left, -1, dtype=int)
+    ancestor_nodes: dict = {}
+    #ancestor_nodes: np.ndarray[int] = np.full_like(children_left, -1, dtype=int)
     edge_heights: np.ndarray[int] = np.full_like(children_left,-1, dtype=int)
+    has_ancestor: np.ndarray[bool] = np.full_like(children_left,False,dtype=bool)
 
     def _recursive_search(
             node_id: int,
@@ -106,8 +109,11 @@ def _recursively_copy_tree(
         """
 
         feature_id = features[parents[node_id]]
+        ancestor_nodes[node_id] = last_feature_nodes.copy()
         if seen_features[feature_id]:
-            ancestor_nodes[node_id] = last_feature_nodes[feature_id]
+            #ancestor_nodes[node_id] = last_feature_nodes[feature_id]
+            has_ancestor[node_id] = True
+
         seen_features[feature_id] = True
         last_feature_nodes[feature_id] = node_id
         if children_left[node_id] > -1:  # node is not a leaf
@@ -122,7 +128,7 @@ def _recursively_copy_tree(
     init_last_feature_nodes = np.full(n_features, -1, dtype=int)
     _recursive_search(children_left[0], init_seen_features.copy(), init_last_feature_nodes.copy())
     _recursive_search(children_right[0], init_seen_features.copy(), init_last_feature_nodes.copy())
-    return ancestor_nodes, edge_heights
+    return ancestor_nodes, edge_heights, has_ancestor
 
 
 def convert_tree(tree: Union[DecisionTreeRegressor, DecisionTreeClassifier]) -> tree_model:
