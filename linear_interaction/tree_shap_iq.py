@@ -9,17 +9,52 @@ from scipy.special import binom
 from utils import _recursively_copy_tree, _get_parent_array, powerset, _get_conditional_sample_weights
 
 
-class LinearTreeSHAPExplainer:
+class TreeSHAPIQExplainer:
 
     def __init__(
             self,
             tree_model: dict,
+            max_interaction_order: int = 1,
             observational: bool = True,
             background_dataset: np.ndarray = None,
             n_features: int = None,
             root_node_id: int = 0,
-            max_interaction_order: int = 1
     ):
+        """The TreeSHAPIQExplainer class. This class is a reimplementation of the original Linear
+            TreeSHAP algorithm for the case of interaction order 1 (i.e. Shapley value). If the
+            interaction order is higher than 1, the algorithm compute Shapley interaction values up
+            to that order. The algorithm can be used for both the ´observational´ and
+            ´interventional´ Shapley approach. The interventional Shapley approach requires a
+            background dataset to be provided.
+
+        Args:
+            tree_model (dict): The tree model to be explained. The tree model must be a dictionary
+                with the following keys:
+                    - children_left: np.ndarray[int] - The left children of each node. -1 for leaf
+                        nodes.
+                    - children_right: np.ndarray[int] - The right children of each node. -1 for leaf
+                        nodes.
+                    - features: np.ndarray[int] - The feature used for splitting at each node. -2
+                        for leaf nodes.
+                    - thresholds: np.ndarray[float] - The threshold used for splitting at each node.
+                        -2 for leaf nodes.
+                    - values: np.ndarray[float] - The leaf values of the tree.
+                    - node_sample_weight: np.ndarray[float] - The sample weights of the tree. Only
+                        required for observational Shapley interactions.
+            max_interaction_order (int, optional): The maximum interaction order to be computed. An
+                interaction order of 1 corresponds to the Shapley value. Any value higher than 1
+                computes the Shapley interactions values up to that order. Defaults to 1 (i.e. SV).
+            observational (bool, optional): Whether to compute the Shapley interactions for the
+                observational or interventional Shapley approach. Defaults to True.
+            background_dataset (np.ndarray, optional): The background dataset to be used for the
+                interventional Shapley approach. The dataset is used to determine how often each
+                child node is reached by the background dataset without splitting before. Defaults
+                to None.
+            n_features (int, optional): The number of features of the dataset. If no value is
+                provided, the number of features is determined by the maximum feature id in the tree
+                model. Defaults to None.
+            root_node_id (int, optional): The root node id of the tree. Defaults to 0.
+        """
         # get the node attributes from the tree_model definition
         self.children_left: np.ndarray[int] = tree_model["children_left"]  # -1 for leaf nodes
         self.children_right: np.ndarray[int] = tree_model["children_right"]  # -1 for leaf nodes
@@ -38,21 +73,23 @@ class LinearTreeSHAPExplainer:
         self.root_node_id: int = root_node_id
         self.n_features: int = n_features
         if n_features is None:
-            self.n_features: int = len(np.unique(self.features))
+            self.n_features: int = max(self.features) + 1
 
+        # get the leaf predictions and the observational or interventional sample weights
         self.values = tree_model["values"]
         self.interaction_order = max_interaction_order
-        # get the observational or interventional sample weights
         if observational:
-            self.node_sample_weight = tree_model["node_sample_weight"]
-            self.weights, self.leaf_predictions = self._recursively_compute_weights(
-                self.children_left, self.children_right, self.node_sample_weight, self.values)
+            node_sample_weight = tree_model["node_sample_weight"]
         else:
-            self.node_sample_weight = self._compute_interventional_node_sample_weights(
-                background_dataset)
             # TODO check if the leaf_pred are correct or incorporate TreeSHAP
-            self.weights, self.leaf_predictions = self._recursively_compute_interventional_weights(
-                self.children_left, self.children_right, self.node_sample_weight, self.values)
+            node_sample_weight = self._compute_interventional_node_sample_weights(background_dataset)
+        self.weights, self.leaf_predictions = self._recursively_compute_weights(
+            children_left=self.children_left,
+            children_right=self.children_right,
+            node_sample_weight=node_sample_weight,
+            values=self.values,
+            observational=observational
+        )
 
         self.ancestor_nodes, self.edge_heights, self.has_ancestors = _recursively_copy_tree(
             self.children_left, self.children_right, self.parents, self.features, self.n_features,
@@ -69,17 +106,18 @@ class LinearTreeSHAPExplainer:
         self.empty_prediction: float = float(np.sum(self.leaf_predictions[self.leaf_mask]))
 
         # stores the interaction scores up to a given order
-        self.shapley_interactions: np.ndarray[float] = np.zeros(int(binom(self.n_features, max_interaction_order)), dtype=float)
+        self.max_order: int = max_interaction_order
+        self.shapley_interactions: np.ndarray[float] = np.zeros(int(binom(self.n_features, self.max_order)), dtype=float)
         self.shapley_interactions_lookup: dict = {}
         self.subset_ancestors: dict = {}
         self.subset_updates_pos: dict = {}  # stores position of interactions that include feature i
         self.subset_updates: dict = {}  # stores interactions that include feature i
+        self._precalculate_interaction_ancestors()
 
     def explain(
             self,
             x: np.ndarray,
-            order: int = 1,
-            reset: bool = True
+            order: int = 1
     ) -> np.ndarray[float]:
         """Computes the Shapley Interaction values for a given instance x and interaction order.
             This function is the main explanation function of this class.
@@ -92,7 +130,9 @@ class LinearTreeSHAPExplainer:
             np.ndarray[float]: Shapley Interaction values. The shape of the array is (n_features,
                 order).
         """
-        self._reset_for_explanation(order=order, reset=reset)
+        assert order <= self.max_order, f"Order {order} is larger than the maximum interaction " \
+                                        f"order {self.max_order}."
+        self.shapley_interactions = np.zeros(int(binom(self.n_features, order)), dtype=float)
         # get an array index by the nodes
         initial_polynomial = Polynomial([1.])
         # call the recursive function to compute the shapley values
@@ -265,42 +305,35 @@ class LinearTreeSHAPExplainer:
                     x, S, self.children_right[node_id], weight * self.weights[self.children_right[node_id]])
         return subset_val_left + subset_val_right
 
-    def _reset_for_explanation(self, order: int = 1, reset: bool = True):
-        """Resets the class variables for a new explanation"""
-        self.shapley_interactions = np.zeros(int(binom(self.n_features, order)), dtype=float)
+    def _precalculate_interaction_ancestors(self):
+        """Calculates the position of the ancestors of the interactions for the tree for a given
+        order of interactions."""
 
-        if reset:
-            self.shapley_interactions_lookup = {}
-            self.subset_ancestors = {}
-            self.subset_updates_pos = {}
-            self.subset_updates = {}
+        # stores position of interactions
+        counter_interaction = 0
 
-            # Stores position of interactions
-            counter_interaction = 0
-
+        for node_id in self.ancestor_nodes:
+            self.subset_ancestors[node_id] = np.full(int(binom(self.n_features, self.max_order)), -1, dtype=int)
+        for S in powerset(range(self.n_features), self.max_order):
+            self.shapley_interactions_lookup[S] = counter_interaction
             for node_id in self.ancestor_nodes:
-                self.subset_ancestors[node_id] = np.full(int(binom(self.n_features, order)), -1,
-                                                         dtype=int)
-            for S in powerset(range(self.n_features), order):
-                self.shapley_interactions_lookup[S] = counter_interaction
-                for node_id in self.ancestor_nodes:
-                    subset_ancestor = -1
-                    for i in S:
-                        subset_ancestor = max(subset_ancestor, self.ancestor_nodes[node_id][i])
-                    self.subset_ancestors[node_id][counter_interaction] = subset_ancestor
-                counter_interaction += 1
+                subset_ancestor = -1
+                for i in S:
+                    subset_ancestor = max(subset_ancestor, self.ancestor_nodes[node_id][i])
+                self.subset_ancestors[node_id][counter_interaction] = subset_ancestor
+            counter_interaction += 1
 
-            for i in range(self.n_features):
-                subsets = []
-                positions = np.zeros(int(binom(self.n_features - 1, order - 1)), dtype=int)
-                pos_counter = 0
-                for S in powerset(range(self.n_features), min_size=order, max_size=order):
-                    if i in S:
-                        positions[pos_counter] = self.shapley_interactions_lookup[S]
-                        subsets.append(S)
-                        pos_counter += 1
-                self.subset_updates_pos[i] = positions
-                self.subset_updates[i] = subsets
+        for i in range(self.n_features):
+            subsets = []
+            positions = np.zeros(int(binom(self.n_features - 1, self.max_order - 1)), dtype=int)
+            pos_counter = 0
+            for S in powerset(range(self.n_features), min_size=self.max_order, max_size=self.max_order):
+                if i in S:
+                    positions[pos_counter] = self.shapley_interactions_lookup[S]
+                    subsets.append(S)
+                    pos_counter += 1
+            self.subset_updates_pos[i] = positions
+            self.subset_updates[i] = subsets
 
     @staticmethod
     def _compute_poly_interaction(S: tuple, p_e_values: np.ndarray[float]) -> Polynomial:
@@ -352,40 +385,12 @@ class LinearTreeSHAPExplainer:
         return sample_weights
 
     @staticmethod
-    def _recursively_compute_interventional_weights(
-            children_left: np.ndarray[int],
-            children_right: np.ndarray[int],
-            node_sample_weight: np.ndarray[float],
-            values: np.ndarray[float]
-    ) -> tuple[np.ndarray[float], np.ndarray[float]]:
-
-        # Use observations to compute weights (observational approach)
-        weights: np.ndarray[float] = node_sample_weight.copy()
-        leaf_predictions: np.ndarray[float] = np.zeros(children_left.shape, dtype=float)
-        path_probabilities: np.ndarray[float] = np.zeros(children_left.shape, dtype=float)
-        path_probabilities[0] = 1.
-
-        def _recursive_compute(node_id: int):
-            """Recursively search for the ancestor node of the current node."""
-            if children_left[node_id] > -1:  # not a leaf node
-                path_probabilities[children_left[node_id]] = path_probabilities[node_id] * weights[
-                    children_left[node_id]]
-                _recursive_compute(children_left[node_id])
-                path_probabilities[children_right[node_id]] = path_probabilities[node_id] * weights[
-                    children_right[node_id]]
-                _recursive_compute(children_right[node_id])
-            else:  # is a leaf node multiply weights (R^v_\emptyset) by leaf_prediction
-                leaf_predictions[node_id] = path_probabilities[node_id] * values[node_id]
-
-        _recursive_compute(0)
-        return weights, leaf_predictions
-
-    @staticmethod
     def _recursively_compute_weights(
             children_left: np.ndarray[int],
             children_right: np.ndarray[int],
             node_sample_weight: np.ndarray[int],
-            values: np.ndarray[float]
+            values: np.ndarray[float],
+            observational: bool = True,
     ) -> tuple[np.ndarray[float], np.ndarray[float]]:
         """Traverse the tree and recursively copy edge information from the tree. Get the feature
             ancestor nodes for each node in the tree. An ancestor node is the last observed node that
@@ -397,14 +402,21 @@ class LinearTreeSHAPExplainer:
             children_right (np.ndarray[int]): The right children of the tree. Leaf nodes are -1.
             node_sample_weight (np.ndarray[int]): The number of samples in each node.
             values (np.ndarray[float]): The values of each node in the tree.
+            observational (bool): Flag to indicate whether to use observational or interventional
+                sample weights. Defaults to True (observational).
 
         Returns:
             ancestor_nodes (np.ndarray[int]): The ancestor nodes for each node in the tree.
             edge_heights (np.ndarray[int]): The edge heights for each node in the tree.
         """
-        weights: np.ndarray[float] = np.ones(children_left.shape, dtype=float)
         leaf_predictions: np.ndarray[float] = np.zeros(children_left.shape, dtype=float)
-        n_total_samples = node_sample_weight[0]
+        if observational:
+            weights: np.ndarray[float] = np.ones(children_left.shape, dtype=float)
+            n_total_samples = node_sample_weight[0]
+        else:
+            weights: np.ndarray[float] = node_sample_weight.copy()
+            path_probabilities: np.ndarray[float] = np.zeros(children_left.shape, dtype=float)
+            path_probabilities[0] = 1.
 
         def _recursive_compute(node_id: int):
             """Recursively search for the ancestor node of the current node."""
@@ -416,7 +428,20 @@ class LinearTreeSHAPExplainer:
             else:  # is a leaf node multiply weights (R^v_\emptyset) by leaf_prediction
                 leaf_predictions[node_id] = node_sample_weight[node_id] / n_total_samples * values[node_id]
 
-        _recursive_compute(0)
+        def _recursive_compute_int(node_id: int):
+            """Recursively search for the ancestor node of the current node."""
+            if children_left[node_id] > -1:  # not a leaf node
+                path_probabilities[children_left[node_id]] = path_probabilities[node_id] * weights[children_left[node_id]]
+                _recursive_compute_int(children_left[node_id])
+                path_probabilities[children_right[node_id]] = path_probabilities[node_id] * weights[children_right[node_id]]
+                _recursive_compute_int(children_right[node_id])
+            else:  # is a leaf node multiply weights (R^v_\emptyset) by leaf_prediction
+                leaf_predictions[node_id] = path_probabilities[node_id] * values[node_id]
+
+        if observational:
+            _recursive_compute(0)
+        else:
+            _recursive_compute_int(0)
         return weights, leaf_predictions
 
     @staticmethod
@@ -548,7 +573,10 @@ class LinearTreeSHAPExplainer:
 if __name__ == "__main__":
     DO_TREE_SHAP = False
     DO_PLOTTING = True
-    DO_OBSERVATIONAL = True
+    DO_OBSERVATIONAL = False
+    DO_GROUND_TRUTH = False
+
+    INTERACTION_ORDER = 1
 
     from linear_interaction.utils import convert_tree
 
@@ -563,6 +591,7 @@ if __name__ == "__main__":
     from sklearn.tree import DecisionTreeRegressor, plot_tree
     import matplotlib.pyplot as plt
     import numpy as np
+    from copy import deepcopy
 
     # fix random seed for reproducibility
     random_seed = 10
@@ -616,9 +645,9 @@ if __name__ == "__main__":
         # explain the tree with observational TreeSHAP
         start_time = time.time()
         if DO_OBSERVATIONAL:
-            explainer_shap = TreeExplainer(model, feature_perturbation="tree_path_dependent")
+            explainer_shap = TreeExplainer(deepcopy(model), feature_perturbation="tree_path_dependent")
         else:
-            explainer_shap = TreeExplainer(model, feature_perturbation="interventional", data=X)
+            explainer_shap = TreeExplainer(deepcopy(model), feature_perturbation="interventional", data=X[:50])
 
         sv_tree_shap = explainer_shap.shap_values(x_input)
         time_elapsed = time.time() - start_time
@@ -633,10 +662,10 @@ if __name__ == "__main__":
     # LinearTreeSHAP -------------------------------------------------------------------------------
     # explain the tree with LinearTreeSHAP
     start_time = time.time()
-    explainer = LinearTreeSHAPExplainer(
-        tree_model=tree_dict, n_features=x_input.shape[1], observational=DO_OBSERVATIONAL
+    explainer = TreeSHAPIQExplainer(
+        tree_model=deepcopy(tree_dict), n_features=x_input.shape[1], observational=True
     )
-    sv_linear_tree_shap = explainer.explain(x_input[0], 2)
+    sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER)
     time_elapsed = time.time() - start_time
 
     print("Linear")
@@ -647,40 +676,41 @@ if __name__ == "__main__":
     print("Linear - empty pred      ", explainer.empty_prediction)
     print()
 
-    start_time = time.time()
-    #explainer = LinearTreeSHAPExplainer(
-    #   tree_model=tree_dict, n_features=x_input.shape[1], observational=DO_OBSERVATIONAL
-    #)
-    sv_linear_tree_shap = explainer.explain(x_input[0], 2, reset=False)
-    time_elapsed = time.time() - start_time
+    if not DO_OBSERVATIONAL:
+        start_time = time.time()
+        explainer = TreeSHAPIQExplainer(
+           tree_model=deepcopy(tree_dict), n_features=x_input.shape[1], observational=False, background_dataset=X[:50]
+        )
+        sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER)
+        time_elapsed = time.time() - start_time
 
-    print("Linear")
-    print("Linear - time elapsed    ", time_elapsed)
-    print("Linear - SVs (obs.)      ", sv_linear_tree_shap)
-    print("Linear - sum SVs (obs.)  ", sv_linear_tree_shap.sum() + explainer.empty_prediction)
-    print("Linear - time elapsed    ", time_elapsed)
-    print("Linear - empty pred      ", explainer.empty_prediction)
-    print()
+        print("Linear")
+        print("Linear - time elapsed    ", time_elapsed)
+        print("Linear - SVs (int.)      ", sv_linear_tree_shap)
+        print("Linear - sum SVs (int.)  ", sv_linear_tree_shap.sum() + explainer.empty_prediction)
+        print("Linear - time elapsed    ", time_elapsed)
+        print("Linear - empty pred      ", explainer.empty_prediction)
+        print()
 
     # Ground Truth Brute Force ---------------------------------------------------------------------
     # compute the ground truth interactions with brute force
-    MAX_ORDER = 2
+    if DO_GROUND_TRUTH:
 
-    start_time = time.time()
-    gt_results = explainer.explain_brute_force(x_input[0], MAX_ORDER)
-    ground_truth_shap_int, ground_truth_shap_int_pos = gt_results
-    time_elapsed = time.time() - start_time
+        start_time = time.time()
+        gt_results = explainer.explain_brute_force(x_input[0], INTERACTION_ORDER)
+        ground_truth_shap_int, ground_truth_shap_int_pos = gt_results
+        time_elapsed = time.time() - start_time
 
-    print("Ground Truth")
-    print("GT - time elapsed        ", time_elapsed)
-    print()
-    for ORDER in range(MAX_ORDER + 1):
-        print(f"GT - order {ORDER} SIs         ", ground_truth_shap_int[ORDER])
-        print(f"GT - order {ORDER} sum SIs     ", ground_truth_shap_int[ORDER].sum())
+        print("Ground Truth")
+        print("GT - time elapsed        ", time_elapsed)
         print()
+        for ORDER in range(INTERACTION_ORDER + 1):
+            print(f"GT - order {ORDER} SIs         ", ground_truth_shap_int[ORDER])
+            print(f"GT - order {ORDER} sum SIs     ", ground_truth_shap_int[ORDER].sum())
+            print()
 
-    # debug order =2
-    if len(sv_linear_tree_shap) == binom(x_input.shape[1], 2):
-        mismatch = np.where((ground_truth_shap_int[2] - sv_linear_tree_shap) ** 2 > 0.001)
-        for key in mismatch[0]:
-            print(ground_truth_shap_int_pos[2][key])
+        # debug order =2
+        if len(sv_linear_tree_shap) == binom(x_input.shape[1], 2):
+            mismatch = np.where((ground_truth_shap_int[2] - sv_linear_tree_shap) ** 2 > 0.001)
+            for key in mismatch[0]:
+                print(ground_truth_shap_int_pos[2][key])
