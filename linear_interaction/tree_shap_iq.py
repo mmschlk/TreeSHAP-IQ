@@ -6,7 +6,7 @@ from numpy.polynomial import Polynomial
 from numpy.polynomial.polynomial import polydiv
 from scipy.special import binom
 
-from utils import _recursively_copy_tree, _get_parent_array, powerset, _get_conditional_sample_weights
+from utils import _recursively_copy_tree, _get_parent_array, powerset
 
 
 class TreeSHAPIQExplainer:
