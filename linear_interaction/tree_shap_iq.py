@@ -30,15 +30,16 @@ class TreeSHAPIQExplainer:
         Args:
             tree_model (dict): The tree model to be explained. The tree model must be a dictionary
                 with the following keys:
-                    - children_left: np.ndarray[int] - The left children of each node. -1 for leaf
-                        nodes.
-                    - children_right: np.ndarray[int] - The right children of each node. -1 for leaf
-                        nodes.
-                    - features: np.ndarray[int] - The feature used for splitting at each node. -2
-                        for leaf nodes.
+                    - children_left: np.ndarray[int] - The left children of each node.
+                        Leaf nodes are denoted with -1.
+                    - children_right: np.ndarray[int] - The right children of each node.
+                        Leaf nodes are denoted with -1.
+                    - features: np.ndarray[int] - The feature used for splitting at each node.
+                        Leaf nodes have the value -2.
                     - thresholds: np.ndarray[float] - The threshold used for splitting at each node.
-                        -2 for leaf nodes.
-                    - values: np.ndarray[float] - The leaf values of the tree.
+                        Leaf nodes have the value -2.
+                    - values: np.ndarray[float] - The output values at the leaf values of the tree.
+                        The values for decision nodes are not required.
                     - node_sample_weight: np.ndarray[float] - The sample weights of the tree. Only
                         required for observational Shapley interactions.
             max_interaction_order (int, optional): The maximum interaction order to be computed. An
