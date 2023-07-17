@@ -1,17 +1,13 @@
 """This module contains the linear TreeSHAP class, which is a reimplementation of the original TreeSHAP algorithm."""
 import time
 
-from utils import tree_model, _recursively_copy_tree, _get_parent_array, powerset, \
-    _get_conditional_sample_weights
-
-from collections import namedtuple
-
 import numpy as np
 from numpy.polynomial import Polynomial
-from numpy.polynomial.polynomial import polydiv, polymul
+from numpy.polynomial.polynomial import polydiv
 from scipy.special import binom
 
-from copy import deepcopy
+from utils import _recursively_copy_tree, _get_parent_array, powerset, _get_conditional_sample_weights
+
 
 class LinearTreeSHAPExplainer:
 
@@ -22,13 +18,12 @@ class LinearTreeSHAPExplainer:
             background_dataset: np.ndarray = None,
             n_features: int = None,
             root_node_id: int = 0,
-            interaction_order: int = 1
+            max_interaction_order: int = 1
     ):
         # get the node attributes from the tree_model definition
         self.children_left: np.ndarray[int] = tree_model["children_left"]  # -1 for leaf nodes
         self.children_right: np.ndarray[int] = tree_model["children_right"]  # -1 for leaf nodes
-        self.parents: np.ndarray[int] = _get_parent_array(self.children_left,
-                                                          self.children_right)  # -1 for the root node
+        self.parents: np.ndarray[int] = _get_parent_array(self.children_left, self.children_right)  # -1 for the root node
         self.features: np.ndarray = tree_model["features"]  # -2 for leaf nodes
         self.thresholds: np.ndarray = tree_model["thresholds"]  # -2 for leaf nodes
 
@@ -46,20 +41,22 @@ class LinearTreeSHAPExplainer:
             self.n_features: int = len(np.unique(self.features))
 
         self.values = tree_model["values"]
-        self.interaction_order = interaction_order
+        self.interaction_order = max_interaction_order
         # get the observational or interventional sample weights
         if observational:
             self.node_sample_weight = tree_model["node_sample_weight"]
             self.weights, self.leaf_predictions = self._recursively_compute_weights(
                 self.children_left, self.children_right, self.node_sample_weight, self.values)
         else:
-            self.node_sample_weight = self._compute_interventional_node_sample_weights(background_dataset)
+            self.node_sample_weight = self._compute_interventional_node_sample_weights(
+                background_dataset)
             # TODO check if the leaf_pred are correct or incorporate TreeSHAP
             self.weights, self.leaf_predictions = self._recursively_compute_interventional_weights(
                 self.children_left, self.children_right, self.node_sample_weight, self.values)
 
         self.ancestor_nodes, self.edge_heights, self.has_ancestors = _recursively_copy_tree(
-            self.children_left, self.children_right, self.parents, self.features, self.n_features, interaction_order)
+            self.children_left, self.children_right, self.parents, self.features, self.n_features,
+            max_interaction_order)
 
         # initialize an array to store the summary polynomials
         self.summary_polynomials: np.ndarray = np.empty(self.n_nodes, dtype=Polynomial)
@@ -68,131 +65,39 @@ class LinearTreeSHAPExplainer:
         self.shapley_values: np.ndarray = np.zeros(self.n_features, dtype=float)
 
         # get empty prediction of model
-        #self.empty_prediction = self.probabilities * self.leaf_predictions
+        # self.empty_prediction = self.probabilities * self.leaf_predictions
         self.empty_prediction: float = float(np.sum(self.leaf_predictions[self.leaf_mask]))
 
-    def explain_brute_force(self,x: np.ndarray,max_order: int = 1):
-        self.shapley_values: np.ndarray = np.zeros(self.n_features, dtype=float)
+        # stores the interaction scores up to a given order
+        self.shapley_interactions: np.ndarray[float] = np.zeros(int(binom(self.n_features, max_interaction_order)), dtype=float)
+        self.shapley_interactions_lookup: dict = {}
+        self.subset_ancestors: dict = {}
+        self.subset_updates_pos: dict = {}  # stores position of interactions that include feature i
+        self.subset_updates: dict = {}  # stores interactions that include feature i
 
-        #Evaluate model for every subset
-        counter_subsets = 0
-        subset_values = np.zeros(2**self.n_features)
-        position_lookup = {}
-        for S in powerset(range(self.n_features)):
-            subset_values[counter_subsets] = self._naive_shapley_recursion(x, S, 0, 1)
-            position_lookup[S] = counter_subsets
-            counter_subsets += 1
+    def explain(
+            self,
+            x: np.ndarray,
+            order: int = 1,
+            reset: bool = True
+    ) -> np.ndarray[float]:
+        """Computes the Shapley Interaction values for a given instance x and interaction order.
+            This function is the main explanation function of this class.
 
+        Args:
+            x (np.ndarray): Instance to be explained.
+            order (int, optional): Order of the interactions. Defaults to 1.
 
-        #Aggregate subsets for the shapley values / interactions
-        shapley_interactions = {}
-        shapley_interactions_lookup = {}
-        for order in range(max_order+1):
-            if order == 0:
-                shapley_interactions[order] = subset_values[position_lookup[()]]
-            else:
-                shapley_interactions[order], shapley_interactions_lookup[order] = self._compute_shapley_from_subsets(subset_values, position_lookup,order)
-        return shapley_interactions, shapley_interactions_lookup
-
-
-    def _compute_shapley_from_subsets(self,subset_values: np.ndarray,position_lookup: dict,order: int = 1):
-        features = range(self.n_features)
-        shapley_interactions = np.zeros(int(binom(self.n_features,order)))
-        shapley_interactions_lookup = {}
-        counter_interactions = 0
-        for S in powerset(features,order):
-            temp_values = 0
-            for T in powerset(set(features)-set(S)):
-                weight_T = 1/(binom(self.n_features-order,len(T))*(self.n_features-order+1))
-                for L in powerset(S):
-                    subset = tuple(sorted(L+T))
-                    pos = position_lookup[subset]
-                    temp_values += weight_T*(-1)**(order-len(L))*subset_values[pos]
-            shapley_interactions[counter_interactions] = temp_values
-            shapley_interactions_lookup[counter_interactions] = S
-            counter_interactions += 1
-        return shapley_interactions, shapley_interactions_lookup
-
-    def _naive_shapley_recursion(self, x: np.ndarray, S: tuple, node_id: int, weight: float):
-        threshold = self.thresholds[node_id]
-        feature_id = self.features[node_id]
-        if self.leaf_mask[node_id]:
-            return self.values[node_id]*weight
-        else:
-            if feature_id in S:
-                if x[feature_id] <= threshold:
-                    subset_val_left = self._naive_shapley_recursion(x, S, self.children_left[node_id], weight)
-                    subset_val_right = 0
-                else:
-                    subset_val_left = 0
-                    subset_val_right = self._naive_shapley_recursion(x, S, self.children_right[node_id], weight)
-            else:
-                subset_val_left = self._naive_shapley_recursion(x, S, self.children_left[node_id], weight*self.weights[self.children_left[node_id]])
-                subset_val_right = self._naive_shapley_recursion(x, S, self.children_right[node_id], weight*self.weights[self.children_right[node_id]])
-        return subset_val_left + subset_val_right
-
-    def explain(self, x: np.ndarray, order: int = 1):
+        Returns:
+            np.ndarray[float]: Shapley Interaction values. The shape of the array is (n_features,
+                order).
+        """
+        self._reset_for_explanation(order=order, reset=reset)
         # get an array index by the nodes
         initial_polynomial = Polynomial([1.])
-        #Stores interactions
-        self.shapley_interactions: np.ndarray = np.zeros(int(binom(self.n_features,order)), dtype=float)
-        #Stores position of interactions
-        self.shapley_interactions_lookup = {}
-        counter_interaction = 0
-
-        self.subset_ancestors = {}
-        for node_id in self.ancestor_nodes:
-            self.subset_ancestors[node_id] = np.full(int(binom(self.n_features, order)), -1, dtype=int)
-        for S in powerset(range(self.n_features),order):
-            self.shapley_interactions_lookup[S] = counter_interaction
-            for node_id in self.ancestor_nodes:
-                #if self.has_ancestors[node_id]:
-                subset_ancestor = -1
-                for i in S:
-                    subset_ancestor = max(subset_ancestor,self.ancestor_nodes[node_id][i])
-                self.subset_ancestors[node_id][counter_interaction] = subset_ancestor
-            counter_interaction += 1
-
-
-
-
-        #Stores position of interactions that include feature i
-        self.subset_updates_pos = {}
-        #Stores interactions that include feature i
-        self.subset_updates = {}
-        for i in range(self.n_features):
-            subsets = []
-            positions = np.zeros(int(binom(self.n_features-1,order-1)),dtype=int)
-            pos_counter = 0
-            for S in powerset(range(self.n_features),min_size=order,max_size=order):
-                if i in S:
-                    positions[pos_counter] = self.shapley_interactions_lookup[S]
-                    subsets.append(S)
-                    pos_counter += 1
-            self.subset_updates_pos[i] = positions
-            self.subset_updates[i] = subsets
-
-
-        self._compute_shapley_values(x, 0, initial_polynomial,order)
-        # get an array indexed by the features
+        # call the recursive function to compute the shapley values
+        self._compute_shapley_values(x, 0, initial_polynomial, order)
         return self.shapley_interactions.copy()
-
-    def _compute_poly_interaction(self,S, p_e_values):
-        #Computes Q_S (interaction polynomial) given p_e values
-        poly_interaction = Polynomial([1.])
-        for i in S:
-            poly_interaction = poly_interaction * Polynomial([p_e_values[i], 1])
-        return poly_interaction
-
-    def _compute_p_e_interaction(self,S, p_e_values):
-        #Computes q_S (interaction factor) given p_e values
-        p_e_interaction = 0
-        for L in powerset(set(S)):
-            p_e_prod = 1
-            for j in L:
-                p_e_prod *= p_e_values[j]
-            p_e_interaction += (-1) ** (len(S) - len(L)) * p_e_prod
-        return p_e_interaction
 
     def _compute_shapley_values(
             self,
@@ -200,54 +105,44 @@ class LinearTreeSHAPExplainer:
             node_id: int,
             path_summary_poly: Polynomial,
             order: int,
-            #p_e_of_feature_ancestor: np.ndarray[float] = None,
             p_e_storage: np.ndarray[float] = None,
             went_left: bool = None,
     ):
-        # to store the p_e(x) of the feature ancestors when the feature was seen last in the path
-        #p_e_of_feature_ancestor: np.ndarray[float] = np.ones(self.n_features, dtype=float) if p_e_of_feature_ancestor is None else p_e_of_feature_ancestor
-
         # to store the p_e(x) of the features
         p_e_storage: np.ndarray[float] = np.ones(self.n_features, dtype=float) if p_e_storage is None else p_e_storage
 
+        # get node / edge information
+        parent_id = self.parents[node_id]
+        feature_id = self.features[parent_id]
+        feature_threshold = self.thresholds[parent_id]
+        edge_weight = self.weights[node_id]
+        # backup ancestor p_e for updates of shapley interactions
+        p_e_ancestor = p_e_storage[feature_id].copy()
+
         # the node had an edge before, so we need to update the summary polynomial
         if node_id is not self.root_node_id:
-            # get node / edge information
-            parent_id = self.parents[node_id]
-            feature_id = self.features[parent_id]
-            feature_threshold = self.thresholds[parent_id]
-            edge_weight = self.weights[node_id]
 
-            # backup ancestor p_e for updates of shapley interactions
-            p_e_ancestor = p_e_storage[feature_id].copy()
-            #Polynomial correction if feature_id has been observed before (has an ancestor)
+            # polynomial correction if feature_id has been observed before (has an ancestor)
             if self.has_ancestors[node_id]:
-                # if feature has an ancestor
-                #Remove previous polynomial factor, to extend with current updated factor
+                # remove previous polynomial factor, to extend with current updated factor
                 path_summary_poly = Polynomial(polydiv(path_summary_poly.coef, Polynomial([p_e_ancestor, 1]).coef)[0])
 
-            #Compute current p_e, i.e. update from previous for this feature_id
+            # compute current p_e, i.e. update from previous for this feature_id and extend summary polynomial
             p_e_current = self._get_p_e(x, feature_id, edge_weight, p_e_storage[feature_id], feature_threshold, went_left)
-            #Update stored p_e values
             p_e_storage[feature_id] = p_e_current
-
-            #Extend summary polynomial
             path_summary_poly = path_summary_poly * Polynomial([p_e_current, 1])
-            #set ancestor information to current feature information
-            #p_e_of_feature_ancestor[feature_id] = p_e_storage.copy()
 
         # if node is a leaf (base case of the recursion)
         if self.leaf_mask[node_id]:
             self.summary_polynomials[node_id] = path_summary_poly * self.leaf_predictions[node_id]
-        else:
-            # if the node is a decision node then we continue the recursion down the tree
+        else:  # if the node is a decision node then we continue the recursion down the tree
             left_child_id = self.children_left[node_id]
             self._compute_shapley_values(
                 x=x,
                 node_id=left_child_id,
                 path_summary_poly=path_summary_poly,
-                order = order,
-                p_e_storage = p_e_storage.copy(),
+                order=order,
+                p_e_storage=p_e_storage.copy(),
                 went_left=True,
             )
             right_child_id = self.children_right[node_id]
@@ -255,8 +150,8 @@ class LinearTreeSHAPExplainer:
                 x=x,
                 node_id=right_child_id,
                 path_summary_poly=path_summary_poly,
-                order = order,
-                p_e_storage = p_e_storage.copy(),
+                order=order,
+                p_e_storage=p_e_storage.copy(),
                 went_left=False,
             )
             # add the summary polynomials of the left and right child nodes together
@@ -266,27 +161,20 @@ class LinearTreeSHAPExplainer:
             )
             # store the summary polynomial of the current node
             self.summary_polynomials[node_id] = added_polynomial
-            #self.summary_polynomials_degree[node_id] = added_polynomial.degree()
-
 
         if node_id is not self.root_node_id:
-            q_S = {}
-            Q_S = {}
-            Q_S_ancestor = {}
-            q_S_ancestor = {}
-            #print("node: ",node_id," feature ", feature_id)
-            for pos,S in zip(self.subset_updates_pos[feature_id],self.subset_updates[feature_id]):
-            #for S in self.shapley_interactions_lookup:
-                #Update interactions for every interactions that contains feature_id
-                #Compute interaction factor and polynomial for aggregation below
+            # TODO describe verbally the q_S variables
+            q_S, Q_S, Q_S_ancestor, q_S_ancestor = {}, {}, {}, {}
+            for pos, S in zip(self.subset_updates_pos[feature_id], self.subset_updates[feature_id]):
+                # compute interaction factor and polynomial for aggregation below
                 q_S[S] = self._compute_p_e_interaction(S, p_e_storage)
                 Q_S[S] = self._compute_poly_interaction(S, p_e_storage)
-                #Update interactions for every interactions that contains feature_id
-                quotient = Polynomial(
-                    polydiv(self.summary_polynomials[node_id].coef, Q_S[S].coef)[0])
+                # update interactions for all interactions that contain feature_id
+                quotient = Polynomial(polydiv(self.summary_polynomials[node_id].coef, Q_S[S].coef)[0])
                 psi = self._psi(quotient)
                 self.shapley_interactions[pos] += q_S[S] * psi
 
+                # if the node has an ancestor, we need to update the interactions for the ancestor
                 ancestor_node_id = self.subset_ancestors[node_id][pos]
                 if ancestor_node_id > -1:
                     p_e_storage_ancestor = p_e_storage.copy()
@@ -300,6 +188,138 @@ class LinearTreeSHAPExplainer:
                     quotient_ancestor = Polynomial(polydiv(psi_product.coef, Q_S_ancestor[S].coef)[0])
                     psi_ancestor = self._psi(quotient_ancestor)
                     self.shapley_interactions[pos] -= q_S_ancestor[S] * psi_ancestor
+
+    def explain_brute_force(
+            self,
+            x: np.ndarray,
+            max_order: int = 1
+    ):
+        self.shapley_values: np.ndarray = np.zeros(self.n_features, dtype=float)
+
+        # Evaluate model for every subset
+        counter_subsets = 0
+        subset_values = np.zeros(2 ** self.n_features)
+        position_lookup = {}
+        for S in powerset(range(self.n_features)):
+            subset_values[counter_subsets] = self._naive_shapley_recursion(x, S, 0, 1)
+            position_lookup[S] = counter_subsets
+            counter_subsets += 1
+
+        # Aggregate subsets for the shapley values / interactions
+        shapley_interactions = {}
+        shapley_interactions_lookup = {}
+        for order in range(max_order + 1):
+            if order == 0:
+                shapley_interactions[order] = subset_values[position_lookup[()]]
+            else:
+                si = self._compute_shapley_from_subsets(subset_values, position_lookup, order)
+                shapley_interactions[order], shapley_interactions_lookup[order] = si
+        return shapley_interactions, shapley_interactions_lookup
+
+    def _compute_shapley_from_subsets(
+            self,
+            subset_values: np.ndarray,
+            position_lookup: dict,
+            order: int = 1
+    ):
+        features = range(self.n_features)
+        shapley_interactions = np.zeros(int(binom(self.n_features, order)))
+        shapley_interactions_lookup = {}
+        counter_interactions = 0
+        for S in powerset(features, order):
+            temp_values = 0
+            for T in powerset(set(features) - set(S)):
+                weight_T = 1 / (binom(self.n_features - order, len(T)) * (self.n_features - order + 1))
+                for L in powerset(S):
+                    subset = tuple(sorted(L + T))
+                    pos = position_lookup[subset]
+                    temp_values += weight_T * (-1) ** (order - len(L)) * subset_values[pos]
+            shapley_interactions[counter_interactions] = temp_values
+            shapley_interactions_lookup[counter_interactions] = S
+            counter_interactions += 1
+        return shapley_interactions, shapley_interactions_lookup
+
+    def _naive_shapley_recursion(
+            self,
+            x: np.ndarray[float],
+            S: tuple,
+            node_id: int,
+            weight: float
+    ):
+        threshold = self.thresholds[node_id]
+        feature_id = self.features[node_id]
+        if self.leaf_mask[node_id]:
+            return self.values[node_id] * weight
+        else:
+            if feature_id in S:
+                if x[feature_id] <= threshold:
+                    subset_val_right = 0
+                    subset_val_left = self._naive_shapley_recursion(x, S, self.children_left[node_id], weight)
+                else:
+                    subset_val_left = 0
+                    subset_val_right = self._naive_shapley_recursion(x, S, self.children_right[node_id], weight)
+            else:
+                subset_val_left = self._naive_shapley_recursion(
+                    x, S, self.children_left[node_id], weight * self.weights[self.children_left[node_id]])
+                subset_val_right = self._naive_shapley_recursion(
+                    x, S, self.children_right[node_id], weight * self.weights[self.children_right[node_id]])
+        return subset_val_left + subset_val_right
+
+    def _reset_for_explanation(self, order: int = 1, reset: bool = True):
+        """Resets the class variables for a new explanation"""
+        self.shapley_interactions = np.zeros(int(binom(self.n_features, order)), dtype=float)
+
+        if reset:
+            self.shapley_interactions_lookup = {}
+            self.subset_ancestors = {}
+            self.subset_updates_pos = {}
+            self.subset_updates = {}
+
+            # Stores position of interactions
+            counter_interaction = 0
+
+            for node_id in self.ancestor_nodes:
+                self.subset_ancestors[node_id] = np.full(int(binom(self.n_features, order)), -1,
+                                                         dtype=int)
+            for S in powerset(range(self.n_features), order):
+                self.shapley_interactions_lookup[S] = counter_interaction
+                for node_id in self.ancestor_nodes:
+                    subset_ancestor = -1
+                    for i in S:
+                        subset_ancestor = max(subset_ancestor, self.ancestor_nodes[node_id][i])
+                    self.subset_ancestors[node_id][counter_interaction] = subset_ancestor
+                counter_interaction += 1
+
+            for i in range(self.n_features):
+                subsets = []
+                positions = np.zeros(int(binom(self.n_features - 1, order - 1)), dtype=int)
+                pos_counter = 0
+                for S in powerset(range(self.n_features), min_size=order, max_size=order):
+                    if i in S:
+                        positions[pos_counter] = self.shapley_interactions_lookup[S]
+                        subsets.append(S)
+                        pos_counter += 1
+                self.subset_updates_pos[i] = positions
+                self.subset_updates[i] = subsets
+
+    @staticmethod
+    def _compute_poly_interaction(S: tuple, p_e_values: np.ndarray[float]) -> Polynomial:
+        """Computes Q_S (interaction polynomial) given p_e values"""
+        poly_interaction = Polynomial([1.])
+        for i in S:
+            poly_interaction = poly_interaction * Polynomial([p_e_values[i], 1])
+        return poly_interaction
+
+    @staticmethod
+    def _compute_p_e_interaction(S: tuple, p_e_values: np.ndarray[float]) -> float:
+        """Computes q_S (interaction factor) given p_e values"""
+        p_e_interaction = 0
+        for L in powerset(set(S)):
+            p_e_prod = 1
+            for j in L:
+                p_e_prod *= p_e_values[j]
+            p_e_interaction += (-1) ** (len(S) - len(L)) * p_e_prod
+        return p_e_interaction
 
     def _compute_interventional_node_sample_weights(
             self,
@@ -348,16 +368,17 @@ class LinearTreeSHAPExplainer:
         def _recursive_compute(node_id: int):
             """Recursively search for the ancestor node of the current node."""
             if children_left[node_id] > -1:  # not a leaf node
-                path_probabilities[children_left[node_id]] = path_probabilities[node_id] * weights[children_left[node_id]]
+                path_probabilities[children_left[node_id]] = path_probabilities[node_id] * weights[
+                    children_left[node_id]]
                 _recursive_compute(children_left[node_id])
-                path_probabilities[children_right[node_id]] = path_probabilities[node_id] * weights[children_right[node_id]]
+                path_probabilities[children_right[node_id]] = path_probabilities[node_id] * weights[
+                    children_right[node_id]]
                 _recursive_compute(children_right[node_id])
             else:  # is a leaf node multiply weights (R^v_\emptyset) by leaf_prediction
                 leaf_predictions[node_id] = path_probabilities[node_id] * values[node_id]
 
         _recursive_compute(0)
         return weights, leaf_predictions
-
 
     @staticmethod
     def _recursively_compute_weights(
@@ -381,8 +402,6 @@ class LinearTreeSHAPExplainer:
             ancestor_nodes (np.ndarray[int]): The ancestor nodes for each node in the tree.
             edge_heights (np.ndarray[int]): The edge heights for each node in the tree.
         """
-
-        # Use observations to compute weights (observational approach)
         weights: np.ndarray[float] = np.ones(children_left.shape, dtype=float)
         leaf_predictions: np.ndarray[float] = np.zeros(children_left.shape, dtype=float)
         n_total_samples = node_sample_weight[0]
@@ -527,7 +546,7 @@ class LinearTreeSHAPExplainer:
 
 
 if __name__ == "__main__":
-    DO_TREE_SHAP = True
+    DO_TREE_SHAP = False
     DO_PLOTTING = True
     DO_OBSERVATIONAL = True
 
@@ -567,27 +586,17 @@ if __name__ == "__main__":
     # TreeSHAP -------------------------------------------------------------------------------------
 
     my_thresholds = clf.tree_.threshold.copy()
-    #my_thresholds[32] = 0.5
+    # my_thresholds[32] = 0.5
 
     my_features = clf.tree_.feature.copy()
-    #my_features[0] = 8
-    #my_features[32] = 6
-    #my_features[26] = 8
-    #my_features[33] = 8
-    #my_features[33] = 8
-    #my_features[48] = 1
-    #my_features[57] = 4
-    #my_features[35] = 7
-
-    tree_dict = {
-        "children_left": clf.tree_.children_left.copy(),
-        "children_right": clf.tree_.children_right.copy(),
-        "children_default": clf.tree_.children_left.copy(),
-        "features": clf.tree_.feature.copy(),
-        "thresholds": clf.tree_.threshold.copy(),
-        "values": clf.tree_.value.reshape(-1, 1).copy(),
-        "node_sample_weight": clf.tree_.weighted_n_node_samples.copy(),
-    }
+    # my_features[0] = 8
+    # my_features[32] = 6
+    # my_features[26] = 8
+    # my_features[33] = 8
+    # my_features[33] = 8
+    # my_features[48] = 1
+    # my_features[57] = 4
+    # my_features[35] = 7
 
     tree_dict = {
         "children_left": clf.tree_.children_left.copy(),
@@ -625,7 +634,7 @@ if __name__ == "__main__":
     # explain the tree with LinearTreeSHAP
     start_time = time.time()
     explainer = LinearTreeSHAPExplainer(
-        tree_model=tree_dict, n_features=x_input.shape[1], observational=DO_OBSERVATIONAL, background_dataset=X
+        tree_model=tree_dict, n_features=x_input.shape[1], observational=DO_OBSERVATIONAL
     )
     sv_linear_tree_shap = explainer.explain(x_input[0], 2)
     time_elapsed = time.time() - start_time
@@ -638,28 +647,40 @@ if __name__ == "__main__":
     print("Linear - empty pred      ", explainer.empty_prediction)
     print()
 
+    start_time = time.time()
+    #explainer = LinearTreeSHAPExplainer(
+    #   tree_model=tree_dict, n_features=x_input.shape[1], observational=DO_OBSERVATIONAL
+    #)
+    sv_linear_tree_shap = explainer.explain(x_input[0], 2, reset=False)
+    time_elapsed = time.time() - start_time
+
+    print("Linear")
+    print("Linear - time elapsed    ", time_elapsed)
+    print("Linear - SVs (obs.)      ", sv_linear_tree_shap)
+    print("Linear - sum SVs (obs.)  ", sv_linear_tree_shap.sum() + explainer.empty_prediction)
+    print("Linear - time elapsed    ", time_elapsed)
+    print("Linear - empty pred      ", explainer.empty_prediction)
+    print()
+
     # Ground Truth Brute Force ---------------------------------------------------------------------
     # compute the ground truth interactions with brute force
-    max_order = 2
+    MAX_ORDER = 2
 
     start_time = time.time()
-    gt_results = explainer.explain_brute_force(x_input[0], max_order)
+    gt_results = explainer.explain_brute_force(x_input[0], MAX_ORDER)
     ground_truth_shap_int, ground_truth_shap_int_pos = gt_results
     time_elapsed = time.time() - start_time
 
     print("Ground Truth")
     print("GT - time elapsed        ", time_elapsed)
     print()
-    for order in range(max_order + 1):
-        print(f"GT - order {order} SIs         ", ground_truth_shap_int[order])
-        print(f"GT - order {order} sum SIs     ", ground_truth_shap_int[order].sum())
+    for ORDER in range(MAX_ORDER + 1):
+        print(f"GT - order {ORDER} SIs         ", ground_truth_shap_int[ORDER])
+        print(f"GT - order {ORDER} sum SIs     ", ground_truth_shap_int[ORDER].sum())
         print()
 
-
-
-
-    #debug order =2
-    if len(sv_linear_tree_shap)==binom(x_input.shape[1],2):
+    # debug order =2
+    if len(sv_linear_tree_shap) == binom(x_input.shape[1], 2):
         mismatch = np.where((ground_truth_shap_int[2] - sv_linear_tree_shap) ** 2 > 0.001)
         for key in mismatch[0]:
             print(ground_truth_shap_int_pos[2][key])

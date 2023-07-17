@@ -3,6 +3,7 @@ from typing import Union
 import numpy as np
 import itertools
 from collections import namedtuple
+
 try:
     from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
 except ImportError:
@@ -68,8 +69,8 @@ def _recursively_copy_tree(
         parents: np.ndarray[int],
         features: np.ndarray[int],
         n_features: int,
-        interaction_order: int
-) -> tuple[np.ndarray[int], np.ndarray[int]]:
+        interaction_order: int  # TODO unused atm. Remove?
+) -> tuple[dict, np.ndarray[int], np.ndarray[bool]]:
     """Traverse the tree and recursively copy edge information from the tree. Get the feature
         ancestor nodes for each node in the tree. An ancestor node is the last observed node that
         has the same feature as the current node in the path.The ancestor of the root node is
@@ -81,14 +82,15 @@ def _recursively_copy_tree(
         features (np.ndarray[int]): The feature id of each node in the tree. Leaf nodes are -2.
 
     Returns:
-        ancestor_nodes (np.ndarray[int]): The ancestor nodes for each node in the tree.
+        ancestor_nodes (dict): The ancestor nodes for each node in the tree.
         edge_heights (np.ndarray[int]): The edge heights for each node in the tree.
+        has_ancestor (np.ndarray[bool]): The boolean array denoting whether a node has an ancestor
+            node with the same feature.
     """
 
     ancestor_nodes: dict = {}
-    #ancestor_nodes: np.ndarray[int] = np.full_like(children_left, -1, dtype=int)
-    edge_heights: np.ndarray[int] = np.full_like(children_left,-1, dtype=int)
-    has_ancestor: np.ndarray[bool] = np.full_like(children_left,False,dtype=bool)
+    edge_heights: np.ndarray[int] = np.full_like(children_left, -1, dtype=int)
+    has_ancestor: np.ndarray[bool] = np.full_like(children_left, False, dtype=bool)
 
     def _recursive_search(
             node_id: int,
@@ -111,14 +113,15 @@ def _recursively_copy_tree(
         feature_id = features[parents[node_id]]
         ancestor_nodes[node_id] = last_feature_nodes.copy()
         if seen_features[feature_id]:
-            #ancestor_nodes[node_id] = last_feature_nodes[feature_id]
             has_ancestor[node_id] = True
 
         seen_features[feature_id] = True
         last_feature_nodes[feature_id] = node_id
         if children_left[node_id] > -1:  # node is not a leaf
-            edge_height_left = _recursive_search(children_left[node_id], seen_features.copy(), last_feature_nodes.copy())
-            edge_height_right = _recursive_search(children_right[node_id], seen_features.copy(), last_feature_nodes.copy())
+            edge_height_left = _recursive_search(children_left[node_id], seen_features.copy(),
+                                                 last_feature_nodes.copy())
+            edge_height_right = _recursive_search(children_right[node_id], seen_features.copy(),
+                                                  last_feature_nodes.copy())
             edge_heights[node_id] = max(edge_height_left, edge_height_right)
         else:  # is a leaf node edge height corresponds to the number of features seen on the way
             edge_heights[node_id] = np.sum(seen_features)
@@ -132,6 +135,7 @@ def _recursively_copy_tree(
 
 
 def convert_tree(tree: Union[DecisionTreeRegressor, DecisionTreeClassifier]) -> tree_model:
+    # TODO remove since not used
     """Convert sklearn tree to a tree_model namedtuple.
 
     Args:
@@ -150,9 +154,10 @@ def convert_tree(tree: Union[DecisionTreeRegressor, DecisionTreeClassifier]) -> 
 
     sample_weights_tree = tree.tree_.weighted_n_node_samples
 
-    marginal_probabilities = sample_weights_tree / np.max(sample_weights_tree) # marginal probabilities of each node
-    sample_weights: np.ndarray[float] = _get_conditional_sample_weights(sample_weights_tree, parents)
-
+    marginal_probabilities = sample_weights_tree / np.max(
+        sample_weights_tree)  # marginal probabilities of each node
+    sample_weights: np.ndarray[float] = _get_conditional_sample_weights(sample_weights_tree,
+                                                                        parents)
 
     leaf_predictions = tree.tree_.value.squeeze(axis=1).squeeze()
 
@@ -171,7 +176,6 @@ def convert_tree(tree: Union[DecisionTreeRegressor, DecisionTreeClassifier]) -> 
         ancestors=ancestors,
         edge_heights=edge_heights,
     )
-
 
 
 def powerset(iterable, min_size=-1, max_size=None):
