@@ -6,7 +6,7 @@ from numpy.polynomial import Polynomial
 from numpy.polynomial.polynomial import polydiv
 from scipy.special import binom
 
-from utils import _recursively_copy_tree, _get_parent_array, powerset
+from utils import _get_parent_array, powerset
 
 
 class TreeSHAPIQExplainer:
@@ -84,17 +84,23 @@ class TreeSHAPIQExplainer:
         else:
             # TODO check if the leaf_pred are correct or incorporate TreeSHAP
             node_sample_weight = self._compute_interventional_node_sample_weights(background_dataset)
-        self.weights, self.leaf_predictions = self._recursively_compute_weights(
+
+        # traverse the tree and compute edge information
+        traversed_tree = self._recursive_copy(
             children_left=self.children_left,
             children_right=self.children_right,
             node_sample_weight=node_sample_weight,
             values=self.values,
+            features=self.features,
+            parents=self.parents,
+            n_features=self.n_features,
             observational=observational
         )
-
-        self.ancestor_nodes, self.edge_heights, self.has_ancestors = _recursively_copy_tree(
-            self.children_left, self.children_right, self.parents, self.features, self.n_features,
-            max_interaction_order)
+        self.weights: np.ndarray[float] = traversed_tree[0]
+        self.leaf_predictions: np.ndarray[float] = traversed_tree[1]
+        self.ancestor_nodes: dict = traversed_tree[2]
+        self.edge_heights: np.ndarray[int] = traversed_tree[3]
+        self.has_ancestors: np.ndarray[bool] = traversed_tree[4]
 
         # initialize an array to store the summary polynomials
         self.summary_polynomials: np.ndarray = np.empty(self.n_nodes, dtype=Polynomial)
@@ -386,31 +392,23 @@ class TreeSHAPIQExplainer:
         return sample_weights
 
     @staticmethod
-    def _recursively_compute_weights(
+    def _recursive_copy(
             children_left: np.ndarray[int],
             children_right: np.ndarray[int],
             node_sample_weight: np.ndarray[int],
             values: np.ndarray[float],
-            observational: bool = True,
-    ) -> tuple[np.ndarray[float], np.ndarray[float]]:
-        """Traverse the tree and recursively copy edge information from the tree. Get the feature
-            ancestor nodes for each node in the tree. An ancestor node is the last observed node that
-            has the same feature as the current node in the path.The ancestor of the root node is
-            -1. The ancestor nodes are found through recursion from the root node.
+            features: np.ndarray[int],
+            parents: np.ndarray[int],
+            n_features: int,
+            observational: bool = True
+    ) -> tuple[np.ndarray[float], np.ndarray[float], dict, np.ndarray[int], np.ndarray[bool]]:
+        """Traverses the tree recursively and computes edge information."""
 
-        Args:
-            children_left (np.ndarray[int]): The left children of the tree. Leaf nodes are -1.
-            children_right (np.ndarray[int]): The right children of the tree. Leaf nodes are -1.
-            node_sample_weight (np.ndarray[int]): The number of samples in each node.
-            values (np.ndarray[float]): The values of each node in the tree.
-            observational (bool): Flag to indicate whether to use observational or interventional
-                sample weights. Defaults to True (observational).
-
-        Returns:
-            ancestor_nodes (np.ndarray[int]): The ancestor nodes for each node in the tree.
-            edge_heights (np.ndarray[int]): The edge heights for each node in the tree.
-        """
         leaf_predictions: np.ndarray[float] = np.zeros(children_left.shape, dtype=float)
+        ancestor_nodes: dict = {}
+        edge_heights: np.ndarray[int] = np.full_like(children_left, -1, dtype=int)
+        has_ancestor: np.ndarray[bool] = np.full_like(children_left, False, dtype=bool)
+
         if observational:
             weights: np.ndarray[float] = np.ones(children_left.shape, dtype=float)
             n_total_samples = node_sample_weight[0]
@@ -419,31 +417,43 @@ class TreeSHAPIQExplainer:
             path_probabilities: np.ndarray[float] = np.zeros(children_left.shape, dtype=float)
             path_probabilities[0] = 1.
 
-        def _recursive_compute(node_id: int):
-            """Recursively search for the ancestor node of the current node."""
-            if children_left[node_id] > -1:  # not a leaf node
-                weights[children_left[node_id]] = node_sample_weight[children_left[node_id]] / node_sample_weight[node_id]
-                _recursive_compute(children_left[node_id])
-                weights[children_right[node_id]] = node_sample_weight[children_right[node_id]] / node_sample_weight[node_id]
-                _recursive_compute(children_right[node_id])
-            else:  # is a leaf node multiply weights (R^v_\emptyset) by leaf_prediction
-                leaf_predictions[node_id] = node_sample_weight[node_id] / n_total_samples * values[node_id]
+        def _recursive_search(
+                node_id: int,
+                seen_features: np.ndarray[bool],
+                last_feature_nodes: np.ndarray[int]
+        ):
+            """Recursive traversal of the tree."""
+            feature_id = features[parents[node_id]]
+            ancestor_nodes[node_id] = last_feature_nodes.copy()
+            if seen_features[feature_id]:
+                has_ancestor[node_id] = True
 
-        def _recursive_compute_int(node_id: int):
-            """Recursively search for the ancestor node of the current node."""
-            if children_left[node_id] > -1:  # not a leaf node
-                path_probabilities[children_left[node_id]] = path_probabilities[node_id] * weights[children_left[node_id]]
-                _recursive_compute_int(children_left[node_id])
-                path_probabilities[children_right[node_id]] = path_probabilities[node_id] * weights[children_right[node_id]]
-                _recursive_compute_int(children_right[node_id])
-            else:  # is a leaf node multiply weights (R^v_\emptyset) by leaf_prediction
-                leaf_predictions[node_id] = path_probabilities[node_id] * values[node_id]
+            seen_features[feature_id] = True
+            last_feature_nodes[feature_id] = node_id
+            if children_left[node_id] > -1:  # node is not a leaf
+                if observational:
+                    weights[children_left[node_id]] = node_sample_weight[children_left[node_id]] / node_sample_weight[node_id]
+                else:
+                    path_probabilities[children_left[node_id]] = path_probabilities[node_id] * weights[children_left[node_id]]
+                edge_height_left = _recursive_search(children_left[node_id], seen_features.copy(), last_feature_nodes.copy())
+                if observational:
+                    weights[children_right[node_id]] = node_sample_weight[children_right[node_id]] /  node_sample_weight[node_id]
+                else:
+                    path_probabilities[children_right[node_id]] = path_probabilities[node_id] * weights[children_right[node_id]]
+                edge_height_right = _recursive_search(children_right[node_id], seen_features.copy(), last_feature_nodes.copy())
+                edge_heights[node_id] = max(edge_height_left, edge_height_right)
+            else:  # is a leaf node edge height corresponds to the number of features seen on the way
+                edge_heights[node_id] = np.sum(seen_features)
+                if observational:
+                    leaf_predictions[node_id] = node_sample_weight[node_id] / n_total_samples * values[node_id]
+                else:
+                    leaf_predictions[node_id] = values[node_id] * path_probabilities[node_id]
+            return edge_heights[node_id]
 
-        if observational:
-            _recursive_compute(0)
-        else:
-            _recursive_compute_int(0)
-        return weights, leaf_predictions
+        init_seen_features = np.zeros(n_features, dtype=bool)
+        init_last_feature_nodes = np.full(n_features, -1, dtype=int)
+        _recursive_search(0, init_seen_features.copy(), init_last_feature_nodes.copy())
+        return weights, leaf_predictions, ancestor_nodes, edge_heights, has_ancestor
 
     @staticmethod
     def _get_binomial_polynomial(degree: int) -> Polynomial:
