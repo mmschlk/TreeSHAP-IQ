@@ -2,18 +2,11 @@ from typing import Union
 
 import numpy as np
 import itertools
-from collections import namedtuple
 
 try:
     from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
 except ImportError:
     pass
-
-# TODO change the namedtuple definition
-tree_model = namedtuple("Tree", [
-    "children_left", "children_right", "features", "thresholds",
-    "sample_weights", "parents", "empty_rule_predictions", "ancestors", "edge_heights"
-])
 
 
 def _get_parent_array(
@@ -61,121 +54,6 @@ def _get_conditional_sample_weights(
     parent_sample_count = sample_count[parent_array[1:]]
     conditional_sample_weights[1:] = sample_count[1:] / parent_sample_count
     return conditional_sample_weights
-
-
-def _recursively_copy_tree(
-        children_left: np.ndarray[int],
-        children_right: np.ndarray[int],
-        parents: np.ndarray[int],
-        features: np.ndarray[int],
-        n_features: int,
-        interaction_order: int  # TODO unused atm. Remove?
-) -> tuple[dict, np.ndarray[int], np.ndarray[bool]]:
-    """Traverse the tree and recursively copy edge information from the tree. Get the feature
-        ancestor nodes for each node in the tree. An ancestor node is the last observed node that
-        has the same feature as the current node in the path.The ancestor of the root node is
-        -1. The ancestor nodes are found through recursion from the root node.
-
-    Args:
-        children_left (np.ndarray[int]): The left children of the tree. Leaf nodes are -1.
-        children_right (np.ndarray[int]): The right children of the tree. Leaf nodes are -1.
-        features (np.ndarray[int]): The feature id of each node in the tree. Leaf nodes are -2.
-
-    Returns:
-        ancestor_nodes (dict): The ancestor nodes for each node in the tree.
-        edge_heights (np.ndarray[int]): The edge heights for each node in the tree.
-        has_ancestor (np.ndarray[bool]): The boolean array denoting whether a node has an ancestor
-            node with the same feature.
-    """
-
-    ancestor_nodes: dict = {}
-    edge_heights: np.ndarray[int] = np.full_like(children_left, -1, dtype=int)
-    has_ancestor: np.ndarray[bool] = np.full_like(children_left, False, dtype=bool)
-
-    def _recursive_search(
-            node_id: int,
-            seen_features: np.ndarray[bool],
-            last_feature_nodes: np.ndarray[int]
-    ):
-        """Recursively search for the ancestor node of the current node.
-
-        Args:
-            node_id (int): The current node id.
-            seen_features (np.ndarray[bool]): The boolean array denoting whether a feature has been
-                seen in the path.
-            last_feature_nodes (np.ndarray[int]): The last observed node that has the same feature
-                as the current node in the path.
-
-        Returns:
-            edge_height (int): The edge height of the current node.
-        """
-
-        feature_id = features[parents[node_id]]
-        ancestor_nodes[node_id] = last_feature_nodes.copy()
-        if seen_features[feature_id]:
-            has_ancestor[node_id] = True
-
-        seen_features[feature_id] = True
-        last_feature_nodes[feature_id] = node_id
-        if children_left[node_id] > -1:  # node is not a leaf
-            edge_height_left = _recursive_search(children_left[node_id], seen_features.copy(),
-                                                 last_feature_nodes.copy())
-            edge_height_right = _recursive_search(children_right[node_id], seen_features.copy(),
-                                                  last_feature_nodes.copy())
-            edge_heights[node_id] = max(edge_height_left, edge_height_right)
-        else:  # is a leaf node edge height corresponds to the number of features seen on the way
-            edge_heights[node_id] = np.sum(seen_features)
-        return edge_heights[node_id]
-
-    init_seen_features = np.zeros(n_features, dtype=bool)
-    init_last_feature_nodes = np.full(n_features, -1, dtype=int)
-    _recursive_search(children_left[0], init_seen_features.copy(), init_last_feature_nodes.copy())
-    _recursive_search(children_right[0], init_seen_features.copy(), init_last_feature_nodes.copy())
-    return ancestor_nodes, edge_heights, has_ancestor
-
-
-def convert_tree(tree: Union[DecisionTreeRegressor, DecisionTreeClassifier]) -> tree_model:
-    # TODO remove since not used
-    """Convert sklearn tree to a tree_model namedtuple.
-
-    Args:
-        tree (Union[DecisionTreeRegressor, DecisionTreeClassifier]): sklearn tree object.
-
-    Returns:
-        tree_model: TODO add description
-    """
-    children_left: np.ndarray[int] = tree.tree_.children_left  # -1 for leaf nodes
-    children_right: np.ndarray[int] = tree.tree_.children_right  # -1 for leaf nodes
-
-    parents: np.ndarray[int] = _get_parent_array(children_left, children_right)  # -1 for root node
-
-    features: np.ndarray[int] = tree.tree_.feature  # -2 for leaf nodes
-    thresholds: np.ndarray[float] = tree.tree_.threshold  # -2 for leaf nodes
-
-    sample_weights_tree = tree.tree_.weighted_n_node_samples
-
-    marginal_probabilities = sample_weights_tree / np.max(
-        sample_weights_tree)  # marginal probabilities of each node
-    sample_weights: np.ndarray[float] = _get_conditional_sample_weights(sample_weights_tree,
-                                                                        parents)
-
-    leaf_predictions = tree.tree_.value.squeeze(axis=1).squeeze()
-
-    empty_rule_predictions = leaf_predictions * marginal_probabilities  # predictions of empty rules
-
-    ancestors, edge_heights = _recursively_copy_tree(children_left, children_right, features)
-
-    return tree_model(
-        children_left=children_left,
-        children_right=children_right,
-        features=features,
-        thresholds=thresholds,
-        sample_weights=sample_weights,
-        parents=parents,
-        empty_rule_predictions=empty_rule_predictions,
-        ancestors=ancestors,
-        edge_heights=edge_heights,
-    )
 
 
 def powerset(iterable, min_size=-1, max_size=None):
