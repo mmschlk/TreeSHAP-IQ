@@ -37,3 +37,7 @@ to
 ```python
 self._last_mask = np.zeros(data.shape[1], dtype=bool)
 ```
+
+## Experiemnts
+Currently only initial experiments are present, which are described in the following list:
+- _GradientBoostedTree_: An experiment on runnning a GradientBoostedTreeRegressor from sklearn is implemented in `boosted_tree_sklearn.py`.
