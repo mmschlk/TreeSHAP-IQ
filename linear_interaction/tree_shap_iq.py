@@ -6,10 +6,10 @@ from numpy.polynomial import Polynomial
 from numpy.polynomial.polynomial import polydiv
 from scipy.special import binom
 
-from utils import _get_parent_array, powerset
+from .utils import _get_parent_array, powerset
 
 
-class TreeSHAPIQExplainer:
+class TreeShapIQ:
 
     def __init__(
             self,
@@ -589,8 +589,6 @@ if __name__ == "__main__":
 
     INTERACTION_ORDER = 1
 
-    from linear_interaction.utils import convert_tree
-
     if DO_TREE_SHAP:
         try:
             from shap import TreeExplainer
@@ -612,9 +610,6 @@ if __name__ == "__main__":
     X, y = make_regression(1000, n_features=10, random_state=random_seed)
     clf = DecisionTreeRegressor(max_depth=5, random_state=random_seed).fit(X, y)
 
-    # convert the tree to be usable like in TreeSHAP
-    # tree_model = convert_tree(clf)
-
     x_input = X[:1]
     print("Output f(x):", clf.predict(x_input)[0])
 
@@ -626,17 +621,8 @@ if __name__ == "__main__":
     # TreeSHAP -------------------------------------------------------------------------------------
 
     my_thresholds = clf.tree_.threshold.copy()
-    # my_thresholds[32] = 0.5
 
     my_features = clf.tree_.feature.copy()
-    # my_features[0] = 8
-    # my_features[32] = 6
-    # my_features[26] = 8
-    # my_features[33] = 8
-    # my_features[33] = 8
-    # my_features[48] = 1
-    # my_features[57] = 4
-    # my_features[35] = 7
 
     tree_dict = {
         "children_left": clf.tree_.children_left.copy(),
@@ -673,7 +659,7 @@ if __name__ == "__main__":
     # LinearTreeSHAP -------------------------------------------------------------------------------
     # explain the tree with LinearTreeSHAP
     start_time = time.time()
-    explainer = TreeSHAPIQExplainer(
+    explainer = TreeShapIQ(
         tree_model=deepcopy(tree_dict), n_features=x_input.shape[1], observational=True
     )
     sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER)
@@ -689,7 +675,7 @@ if __name__ == "__main__":
 
     if not DO_OBSERVATIONAL:
         start_time = time.time()
-        explainer = TreeSHAPIQExplainer(
+        explainer = TreeShapIQ(
            tree_model=deepcopy(tree_dict), n_features=x_input.shape[1], observational=False, background_dataset=X[:50]
         )
         sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER)
