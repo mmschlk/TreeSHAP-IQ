@@ -6,7 +6,7 @@ from numpy.polynomial import Polynomial
 from numpy.polynomial.polynomial import polydiv
 from scipy.special import binom
 
-from .utils import _get_parent_array, powerset
+from utils import _get_parent_array, powerset
 
 
 class TreeShapIQ:
@@ -121,6 +121,16 @@ class TreeShapIQ:
         self.subset_updates: dict = {}  # stores interactions that include feature i
         self._precalculate_interaction_ancestors()
 
+        #improved calculations
+        self.max_depth = 5 #need to be computed
+        self.D = np.polynomial.chebyshev.chebpts2(self.max_depth)
+        D_powers = self.cache(D)
+        self.Ns = self.get_N(D)
+        self.activation = np.zeros_like(self.children_left, dtype=bool)
+        self.C = np.zeros((self.max_depth + 1, self.max_depth))
+        self.E = np.zeros((self.max_depth + 1, self.max_depth))
+        self.C[0, :] = 1
+
     def explain(
             self,
             x: np.ndarray,
@@ -215,11 +225,12 @@ class TreeShapIQ:
             for pos, S in zip(self.subset_updates_pos[feature_id], self.subset_updates[feature_id]):
                 # compute interaction factor and polynomial for aggregation below
                 q_S[S] = self._compute_p_e_interaction(S, p_e_storage)
-                Q_S[S] = self._compute_poly_interaction(S, p_e_storage)
-                # update interactions for all interactions that contain feature_id
-                quotient = Polynomial(polydiv(self.summary_polynomials[node_id].coef, Q_S[S].coef)[0])
-                psi = self._psi(quotient)
-                self.shapley_interactions[pos] += q_S[S] * psi
+                if q_S[S] != 0:
+                    Q_S[S] = self._compute_poly_interaction(S, p_e_storage)
+                    # update interactions for all interactions that contain feature_id
+                    quotient = Polynomial(polydiv(self.summary_polynomials[node_id].coef, Q_S[S].coef)[0])
+                    psi = self._psi(quotient)
+                    self.shapley_interactions[pos] += q_S[S] * psi
 
                 # if the node has an ancestor, we need to update the interactions for the ancestor
                 ancestor_node_id = self.subset_ancestors[node_id][pos]
@@ -227,14 +238,15 @@ class TreeShapIQ:
                     p_e_storage_ancestor = p_e_storage.copy()
                     p_e_storage_ancestor[feature_id] = p_e_ancestor
                     q_S_ancestor[S] = self._compute_p_e_interaction(S, p_e_storage_ancestor)
-                    Q_S_ancestor[S] = self._compute_poly_interaction(S, p_e_storage_ancestor)
-                    d_e = self.edge_heights[node_id]
-                    d_e_ancestor = self.edge_heights[ancestor_node_id]
-                    psi_factor = Polynomial([1, 1]) ** (d_e_ancestor - d_e)
-                    psi_product = self.summary_polynomials[node_id] * psi_factor
-                    quotient_ancestor = Polynomial(polydiv(psi_product.coef, Q_S_ancestor[S].coef)[0])
-                    psi_ancestor = self._psi(quotient_ancestor)
-                    self.shapley_interactions[pos] -= q_S_ancestor[S] * psi_ancestor
+                    if q_S_ancestor[S] != 0:
+                        Q_S_ancestor[S] = self._compute_poly_interaction(S, p_e_storage_ancestor)
+                        d_e = self.edge_heights[node_id]
+                        d_e_ancestor = self.edge_heights[ancestor_node_id]
+                        psi_factor = Polynomial([1, 1]) ** (d_e_ancestor - d_e)
+                        psi_product = self.summary_polynomials[node_id] * psi_factor
+                        quotient_ancestor = Polynomial(polydiv(psi_product.coef, Q_S_ancestor[S].coef)[0])
+                        psi_ancestor = self._psi(quotient_ancestor)
+                        self.shapley_interactions[pos] -= q_S_ancestor[S] * psi_ancestor
 
     def explain_brute_force(
             self,
@@ -502,6 +514,23 @@ class TreeShapIQ:
         inner_product = np.inner(polynomial.coef, binomial_polynomial.coef)
         return inner_product / (polynomial.degree() + 1)
 
+    def _psi_fast(self, E, D_power, D, q, Ns, d):
+        n = Ns[d, :d]
+        return ((E * D_power / (D + q))[:d]).dot(n) / d
+
+    def get_N(self, D):
+        depth = D.shape[0]
+        Ns = np.zeros((depth + 1, depth))
+        for i in range(1, depth + 1):
+            Ns[i, :i] = np.linalg.inv(np.vander(D[:i]).T).dot(1. / self.get_norm_weight(i - 1))
+        return Ns
+
+    def get_norm_weight(self, M):
+        return np.array([binom(M, i) for i in range(M + 1)])
+
+    def cache(self, D):
+        return np.vander(D + 1).T[::-1]
+
     @staticmethod
     def _get_p_e(
             x: np.ndarray,
@@ -582,9 +611,9 @@ class TreeShapIQ:
 
 
 if __name__ == "__main__":
-    DO_TREE_SHAP = False
+    DO_TREE_SHAP = True
     DO_PLOTTING = True
-    DO_OBSERVATIONAL = False
+    DO_OBSERVATIONAL = True
     DO_GROUND_TRUTH = False
 
     INTERACTION_ORDER = 1
@@ -607,7 +636,7 @@ if __name__ == "__main__":
     np.random.seed(random_seed)
 
     # create dummy regression dataset and fit tree model
-    X, y = make_regression(1000, n_features=10, random_state=random_seed)
+    X, y = make_regression(1000, n_features=20, random_state=random_seed)
     clf = DecisionTreeRegressor(max_depth=5, random_state=random_seed).fit(X, y)
 
     x_input = X[:1]
