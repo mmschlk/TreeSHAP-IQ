@@ -76,7 +76,8 @@ class TreeModel:
 
 def convert_tree_estimator(
         tree_model,
-        scaling: float = 1.
+        scaling: float = 1.,
+        class_label: int = None
 ) -> Union[TreeModel, list[TreeModel]]:
     """Converts a tree estimator to a dictionary or a list of dictionaries.
 
@@ -91,20 +92,26 @@ def convert_tree_estimator(
             contain the following mappings.
 
     """
-    if safe_isinstance(tree_model, "sklearn.tree.DecisionTreeRegressor"):
+    if safe_isinstance(tree_model, "sklearn.tree.DecisionTreeRegressor") or \
+            safe_isinstance(tree_model, "sklearn.tree.DecisionTreeClassifier"):
+        tree_values = tree_model.tree_.value.reshape(-1, 1).copy() * scaling
+        if class_label is not None:
+            tree_values = tree_values[:, class_label]
         return TreeModel(
             children_left=tree_model.tree_.children_left,
             children_right=tree_model.tree_.children_right,
             features=tree_model.tree_.feature,
             thresholds=tree_model.tree_.threshold,
-            values=tree_model.tree_.value.reshape(-1, 1).copy() * scaling,
+            values=tree_values,
             node_sample_weight=tree_model.tree_.weighted_n_node_samples
         )
 
-    if safe_isinstance(tree_model, "sklearn.ensemble.GradientBoostingRegressor"):
+    if safe_isinstance(tree_model, "sklearn.ensemble.GradientBoostingRegressor") or \
+            safe_isinstance(tree_model, "sklearn.ensemble.GradientBoostingClassifier"):
         learning_rate = tree_model.learning_rate
         return [
-            convert_tree_estimator(tree, scaling=learning_rate)
+            # GradientBoostedClassifier contains DecisionTreeRegressor as base_estimators
+            convert_tree_estimator(tree, scaling=learning_rate, class_label=None)
             for tree in tree_model.estimators_[:, 0]
         ]
 

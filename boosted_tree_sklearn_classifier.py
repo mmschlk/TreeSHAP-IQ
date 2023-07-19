@@ -1,9 +1,9 @@
 import time
 
 import numpy as np
-from shap import TreeExplainer
-from sklearn.datasets import make_regression
-from sklearn.ensemble import GradientBoostingRegressor
+
+from sklearn.datasets import make_classification
+from sklearn.ensemble import GradientBoostingClassifier
 from tqdm import tqdm
 
 from linear_interaction.conversion import convert_tree_estimator
@@ -11,24 +11,31 @@ from linear_interaction.tree_shap_iq import TreeShapIQ
 
 if __name__ == "__main__":
     DO_TREE_SHAP = True
+    if DO_TREE_SHAP:
+        from shap import TreeExplainer
     DO_OBSERVATIONAL = True
     DO_GROUND_TRUTH = False
 
     RANDOM_SEED = 42
     INTERACTION_ORDER = 1
+    N_CLASSES = 2
+    if N_CLASSES > 2 and DO_TREE_SHAP:
+        print("TreeShap does not support multiclass classification with GradientBoostingClassifier."
+              "Setting 'DO_TREE_SHAP' to False.")
+        DO_TREE_SHAP = False
 
-    X, y = make_regression(1000, n_features=50, random_state=RANDOM_SEED)
-    model = GradientBoostingRegressor(max_depth=50, random_state=RANDOM_SEED, n_estimators=20)
+    X, y = make_classification(1000, n_features=15, random_state=RANDOM_SEED, n_classes=N_CLASSES, n_informative=5)
+    model = GradientBoostingClassifier(max_depth=10, random_state=RANDOM_SEED, n_estimators=10)
     model.fit(X, y)
 
     # explanation datapoint
     x_explain = X[0]
-    model_output = model.predict(x_explain.reshape(1, -1))
-    print("Model output", model_output)
+    y_true_label = y[0]
+    model_output = model.predict_proba(x_explain.reshape(1, -1))
+    print("Model output", model_output, "True label", y[0])
+    list_of_trees = convert_tree_estimator(model, class_label=y_true_label)
 
-    list_of_trees = convert_tree_estimator(model)
-
-    print("\nTreeShapIQ explanations ------------------")
+    print("TreeShapIQ explanations ------------------")
 
     ensemble_explanations = []
     empty_predictions = []
@@ -51,16 +58,15 @@ if __name__ == "__main__":
     print("Time taken", explanation_time)
     print(ensemble_explanations)
     print("Sum", np.sum(ensemble_explanations))
-    print("Empty predictions for all base models", empty_predictions)
-    print("Sum of empty predictions", np.sum(empty_predictions))
+    #print("Empty prediction", empty_predictions)
+    #print("Sum with empty prediction", np.sum(ensemble_explanations) + np.sum(empty_predictions))
 
     difference = np.sum(ensemble_explanations) - model_output
 
     if DO_GROUND_TRUTH:
         ensemble_explanations = []
-        empty_predictions = []
         explanation_time = 0
-        print("\nGround Truth ------------------")
+        print("Ground Truth ------------------")
         for i, tree_model in tqdm(enumerate(list_of_trees), total=len(list_of_trees)):
             explainer = TreeShapIQ(
                 tree_model=tree_model,
@@ -82,7 +88,7 @@ if __name__ == "__main__":
         print("Sum", np.sum(ensemble_explanations))
 
     if DO_TREE_SHAP:
-        print("\nTreeSHAP explanations ------------------")
+        print("TreeSHAP explanations ------------------")
         # explain the tree with observational TreeSHAP
         if DO_OBSERVATIONAL:
             explainer_shap = TreeExplainer(model, feature_perturbation="tree_path_dependent")
@@ -93,5 +99,5 @@ if __name__ == "__main__":
         print("TreeSHAP explanations")
         print(sv_shap)
         print("Sum", np.sum(sv_shap))
-        print("Empty prediction", empty_prediction)
-        print("Sum with empty prediction", np.sum(sv_shap) + empty_prediction)
+        #print("Empty prediction", empty_prediction)
+        #print("Sum with empty prediction", np.sum(sv_shap) + empty_prediction)
