@@ -181,14 +181,15 @@ class TreeShapIQ:
         ancestor_id = self.ancestors[node_id]
         parent_id = self.parents[node_id]
         feature_id = self.features[parent_id]
-        feature_threshold = self.thresholds[parent_id]
+        child_edge_feature = self.features[node_id]
+        feature_threshold = self.thresholds[node_id]
         activations = self.activations
         is_leaf = left_child < 0
         p_e_ancestor = p_e_storage[feature_id].copy()
 
         # if node is not a leaf -> set activations for children nodes accordingly
         if not is_leaf:
-            if x[feature_id] <= feature_threshold:
+            if x[child_edge_feature] <= feature_threshold:
                 activations[left_child], activations[right_child] = True, False
             else:
                 activations[left_child], activations[right_child] = False, True
@@ -244,7 +245,7 @@ class TreeShapIQ:
         # upward computation of the shapley interactions
         # if node is not the root node -> update the shapley interactions
         # TODO here is where the errors are happenening :) (i think) lol
-        if 0 == 1:
+        if 1 == 0: #deactivate
         #if node_id is not self.root_node_id:
             q_S, Q_S, Q_S_ancestor, q_S_ancestor = {}, {}, {}, {}
             for pos, S in zip(self.subset_updates_pos[feature_id], self.subset_updates[feature_id]):
@@ -992,7 +993,7 @@ if __name__ == "__main__":
 
     # create dummy regression dataset and fit tree model
     X, y = make_regression(1000, n_features=10)
-    clf = DecisionTreeRegressor(max_depth=5, random_state=random_seed).fit(X, y)
+    clf = DecisionTreeRegressor(max_depth=50, random_state=random_seed).fit(X, y)
 
     x_input = X[:1]
     print("Output f(x):", clf.predict(x_input)[0])
