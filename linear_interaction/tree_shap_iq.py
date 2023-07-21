@@ -215,6 +215,21 @@ class TreeShapIQ:
         # if node is leaf -> add the empty prediction to the summary polynomial and store it
         if is_leaf:
             self.summary_polynomials[node_id] = path_summary_poly * self.empty_predictions[node_id]
+            if 1 == 1:
+                q_S, Q_S = {}, {}
+                for S, pos in zip(self.shapley_interactions_lookup,self.shapley_interactions_lookup.values()):
+                    # compute interaction factor and polynomial for aggregation below
+                    q_S[S] = self._compute_p_e_interaction(S, p_e_storage)
+                    if q_S[S] != 0:
+                        Q_S[S] = self._compute_poly_interaction(S, p_e_storage)
+                        # update interactions for all interactions that contain feature_id
+                        quotient = Polynomial(
+                            polydiv(self.summary_polynomials[node_id].coef, Q_S[S].coef)[0])
+                        psi = self._psi(quotient)
+                        self.shapley_interactions[pos] += q_S[S] * psi
+
+
+
         else:  # not a leaf -> continue recursion
             self._compute_shapley_values_new(x, left_child, path_summary_poly, p_e_storage.copy())
             self._compute_shapley_values_new(x, right_child, path_summary_poly, p_e_storage.copy())
@@ -229,7 +244,8 @@ class TreeShapIQ:
         # upward computation of the shapley interactions
         # if node is not the root node -> update the shapley interactions
         # TODO here is where the errors are happenening :) (i think) lol
-        if node_id is not self.root_node_id:
+        if 0 == 1:
+        #if node_id is not self.root_node_id:
             q_S, Q_S, Q_S_ancestor, q_S_ancestor = {}, {}, {}, {}
             for pos, S in zip(self.subset_updates_pos[feature_id], self.subset_updates[feature_id]):
                 # compute interaction factor and polynomial for aggregation below
