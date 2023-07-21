@@ -83,20 +83,25 @@ class TreeShapIQ:
         self.values = tree_model["values"]
         self.interaction_order = max_interaction_order
         if observational:
-            node_sample_weight = tree_model["node_sample_weight"]
+            self.node_sample_weight = tree_model["node_sample_weight"]
         else:
-            # TODO check if the leaf_pred are correct or incorporate TreeSHAP
-            node_sample_weight = self._compute_interventional_node_sample_weights(background_dataset)
-        self.weights, self.leaf_predictions = self._recursively_compute_weights(
-            children_left=self.children_left,
-            children_right=self.children_right,
-            node_sample_weight=node_sample_weight,
-            values=self.values,
-            observational=observational
-        )
+            raise NotImplementedError("Interventional Shapley interactions are not implemented yet.")
+            # TODO Interventional weights need to computed differently
+            #node_sample_weight = self._compute_interventional_node_sample_weights(background_dataset)
+        # self.weights, self.empty_predictions = self._recursively_compute_weights(
+        #     children_left=self.children_left,
+        #     children_right=self.children_right,
+        #     node_sample_weight=self.node_sample_weight,
+        #     values=self.values,
+        #     observational=observational
+        # )
+        #
+        # self.ancestor_nodes, self.edge_heights, self.has_ancestors = self._recursively_copy_tree(
+        #      self.children_left, self.children_right, self.parents, self.features, self.n_features)
 
-        self.ancestor_nodes, self.edge_heights, self.has_ancestors = self._recursively_copy_tree(
-            self.children_left, self.children_right, self.parents, self.features, self.n_features)
+        edge_tree: tuple = self.extract_edge_information_from_tree(max_interaction_order)
+        self.parents, self.ancestors, self.ancestor_nodes, self.p_e_values, self.weights, self.empty_predictions, self.edge_heights, self.max_depth = edge_tree
+        self.has_ancestors = self.ancestors > -1  # TODO ancestor_nodes noch falsch
 
         # initialize an array to store the summary polynomials
         self.summary_polynomials: np.ndarray = np.empty(self.n_nodes, dtype=Polynomial)
@@ -105,8 +110,7 @@ class TreeShapIQ:
         self.shapley_values: np.ndarray = np.zeros(self.n_features, dtype=float)
 
         # get empty prediction of model
-        # self.empty_prediction = self.probabilities * self.leaf_predictions
-        self.empty_prediction: float = float(np.sum(self.leaf_predictions[self.leaf_mask]))
+        self.empty_prediction: float = float(np.sum(self.empty_predictions[self.leaf_mask]))
 
         # stores the interaction scores up to a given order
         self.max_order: int = max_interaction_order
@@ -185,9 +189,17 @@ class TreeShapIQ:
             p_e_storage[feature_id] = p_e_current
             path_summary_poly = path_summary_poly * Polynomial([p_e_current, 1])
 
+
+            # my cool TODO interaction polynomial
+            #path_interaction_poly = path_interaction_poly * Polynomial([p_e_current, -1])
+            #if self.has_ancestors[node_id]:
+            #    path_interaction_poly = path_interaction_poly / Polynomial([p_e_current, -1])
+            # sum of coeffiction
+
+
         # if node is a leaf (base case of the recursion)
         if self.leaf_mask[node_id]:
-            self.summary_polynomials[node_id] = path_summary_poly * self.leaf_predictions[node_id]
+            self.summary_polynomials[node_id] = path_summary_poly * self.empty_predictions[node_id]
         else:  # if the node is a decision node then we continue the recursion down the tree
             left_child_id = self.children_left[node_id]
             self._compute_shapley_values(
@@ -243,6 +255,152 @@ class TreeShapIQ:
                         quotient_ancestor = Polynomial(polydiv(psi_product.coef, Q_S_ancestor[S].coef)[0])
                         psi_ancestor = self._psi(quotient_ancestor)
                         self.shapley_interactions[pos] -= q_S_ancestor[S] * psi_ancestor
+
+    def extract_edge_information_from_tree(
+            self,
+            max_interaction: int = 1,
+            min_interaction: int = 1
+    ):
+        """Extracts edge information recursively from the tree information.
+
+        Parses the tree recursively to create an edge-based representation of the tree. It
+        precalculates the p_e and p_e_ancestors of the interaction subsets up to order
+        'max_interaction'.
+
+        Args:
+            max_interaction (int, optional): The maximum interaction order to be computed. An interaction
+                order of 1 corresponds to the Shapley value. Any value higher than 1 computes the
+                Shapley interactions values up to that order. Defaults to 1 (i.e. SV).
+            min_interaction (int, optional): The minimum interaction order to be computed. Defaults
+                to 1.
+
+        Returns:
+            tuple: A tuple containing the following elements:
+                - parents: np.ndarray[int] - The parents of each node.
+                - ancestors: np.ndarray[int] - The ancestors of each node.
+                - ancestor_nodes: dict[int, np.ndarray[int]] - A dictionary mapping the node id to
+                    the ancestor nodes of the node for each feature.
+                - p_e_values: np.ndarray[float] - The p_e values of each node.
+                - split_weights: np.ndarray[float] - The weights of each node.
+                - empty_predictions: np.ndarray[float] - The empty predictions of each node.
+                - edge_heights: np.ndarray[int] - The edge heights of each node.
+                - max_depth: int - The maximum depth of the tree.
+        """
+        children_left = self.children_left
+        children_right = self.children_right
+        features = self.features
+        n_features = self.n_features
+        node_sample_weight = self.node_sample_weight
+        values = self.values
+        n_nodes = self.n_nodes
+
+        # variables to be filled with recursive function
+        parents = np.full(n_nodes, -1, dtype=int)
+        ancestors: np.ndarray[int] = np.full(self.n_nodes, -1, dtype=int)
+
+        ancestor_nodes: dict[int, np.ndarray[int]] = {}
+
+        p_e_values: np.ndarray[float] = np.ones(n_nodes, dtype=float)
+        split_weights: np.ndarray[float] = np.ones(n_nodes, dtype=float)
+        empty_predictions: np.ndarray[float] = np.full(n_nodes, -1, dtype=float)
+        edge_heights: np.ndarray[int] = np.full_like(children_left, -1, dtype=int)
+        max_depth: list[int] = [0]
+
+        def recursive_search(
+                node_id: int = 0,
+                depth: int = 0,
+                prod_weight: float = 1.,
+                seen_features: np.ndarray[int] = None
+        ):
+            """Traverses the tree recursively and collects all relevant information.
+
+            Args:
+                node_id (int): The current node id.
+                depth (int): The depth of the current node.
+                prod_weight (float): The product of the node weights on the path to the current
+                    node.
+                seen_features (np.ndarray[int]): The features seen on the path to the current node. Maps the
+                    feature id to the node id where the feature was last seen on the way.
+
+            Returns:
+                int: The edge height of the current node.
+            """
+            # if root node, initialize seen_features and p_e_storage
+            if seen_features is None:
+                seen_features: np.ndarray[int] = np.full(n_features, -1, dtype=int) # maps feature_id to ancestor node_id
+
+            # update the maximum depth of the tree
+            max_depth[0] = max(max_depth[0], depth)
+
+            # set the parents of the children nodes
+            left_child, right_child = children_left[node_id], children_right[node_id]
+            is_leaf = left_child == -1
+            if not is_leaf:
+                parents[left_child], parents[right_child] = node_id, node_id
+
+            # if root_node, step into the tree and end recursion
+            if node_id == 0:
+                edge_heights_left = recursive_search(left_child, depth + 1, prod_weight, seen_features.copy())
+                edge_heights_right = recursive_search(right_child, depth + 1, prod_weight, seen_features.copy())
+                edge_heights[node_id] = max(edge_heights_left, edge_heights_right)
+                return edge_heights[node_id]  # final return ending the recursion
+
+            # node is not root node follow the path and compute weights
+
+            ancestor_nodes[node_id] = seen_features.copy()
+
+            # get the feature id of the current node
+            feature_id = features[parents[node_id]]
+
+            # compute prod_weight with node samples
+            n_sample = node_sample_weight[node_id]
+            n_parent = node_sample_weight[parents[node_id]]
+            weight = n_sample / n_parent
+            split_weights[node_id] = weight
+            prod_weight *= weight
+
+            # calculate the p_e value of the current node
+            p_e = weight
+
+            # correct if feature was seen before
+            if seen_features[feature_id] > -1:  # feature has been seen before in the path
+                ancestor_id = seen_features[feature_id]  # get ancestor node with same feature
+                ancestors[node_id] = ancestor_id  # store ancestor node
+                p_e *= p_e_values[ancestor_id]  # add ancestor weight to p_e
+
+            seen_features[feature_id] = node_id  # update seen features with current node
+
+            # store the p_e value of the current node
+            p_e_values[node_id] = 1 / p_e
+
+            # TODO precompute what we can for the interactions
+
+            # update the edge heights
+            if not is_leaf:  # if node is not a leaf, continue recursion
+                edge_heights_left = recursive_search(left_child, depth + 1, prod_weight, seen_features.copy())
+                edge_heights_right = recursive_search(right_child, depth + 1, prod_weight, seen_features.copy())
+                edge_heights[node_id] = max(edge_heights_left, edge_heights_right)
+            else:  # if node is a leaf, end recursion
+                edge_heights[node_id] = np.sum(seen_features > -1)
+                empty_predictions[node_id] = prod_weight * values[node_id]
+            return edge_heights[node_id]  # return upwards in the recursion
+
+        _ = recursive_search()
+        return parents, ancestors, ancestor_nodes, p_e_values, split_weights, empty_predictions, edge_heights, max_depth[0]
+
+    @staticmethod
+    def _all_interactions(
+            feature_id: int,
+            n_features: int,
+            size: int = 1
+    ) -> tuple:
+        """Yields all combinations of size 'size' that contain the feature with id 'feature_id' as a
+        genartor."""
+        # TODO might break with size == 1
+        remaining_features = set(range(n_features)) - {feature_id}
+        for S in powerset(remaining_features, max_size=size - 1):
+            yield tuple(sorted(S + (feature_id,)))
+        return
 
     def explain_brute_force(
             self,
@@ -327,11 +485,11 @@ class TreeShapIQ:
         # stores position of interactions
         counter_interaction = 0
 
-        for node_id in self.ancestor_nodes:
+        for node_id in self.nodes[1:]:  # for all nodes except the root node
             self.subset_ancestors[node_id] = np.full(int(binom(self.n_features, self.max_order)), -1, dtype=int)
         for S in powerset(range(self.n_features), self.max_order):
             self.shapley_interactions_lookup[S] = counter_interaction
-            for node_id in self.ancestor_nodes:
+            for node_id in self.nodes[1:]:  # for all nodes except the root node
                 subset_ancestor = -1
                 for i in S:
                     subset_ancestor = max(subset_ancestor, self.ancestor_nodes[node_id][i])
@@ -705,8 +863,8 @@ if __name__ == "__main__":
     np.random.seed(random_seed)
 
     # create dummy regression dataset and fit tree model
-    X, y = make_regression(1000, n_features=50, n_informative=20)
-    clf = DecisionTreeRegressor(max_depth=100, random_state=random_seed).fit(X, y)
+    X, y = make_regression(1000, n_features=20, n_informative=15)
+    clf = DecisionTreeRegressor(max_depth=20, random_state=random_seed).fit(X, y)
 
     x_input = X[:1]
     print("Output f(x):", clf.predict(x_input)[0])
@@ -740,7 +898,8 @@ if __name__ == "__main__":
     # explain the tree with LinearTreeSHAP
 
     explainer = TreeShapIQ(
-        tree_model=deepcopy(tree_dict), n_features=x_input.shape[1], observational=True
+        tree_model=deepcopy(tree_dict), n_features=x_input.shape[1], observational=True,
+        max_interaction_order=INTERACTION_ORDER
     )
     start_time = time.time()
     sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER)
@@ -757,7 +916,11 @@ if __name__ == "__main__":
     if not DO_OBSERVATIONAL:
         start_time = time.time()
         explainer = TreeShapIQ(
-           tree_model=deepcopy(tree_dict), n_features=x_input.shape[1], observational=False, background_dataset=X[:50]
+            tree_model=deepcopy(tree_dict),
+            n_features=x_input.shape[1],
+            observational=False,
+            background_dataset=X[:50],
+            max_interaction_order=INTERACTION_ORDER
         )
         sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER)
         time_elapsed = time.time() - start_time
@@ -782,7 +945,7 @@ if __name__ == "__main__":
         print("Ground Truth")
         print("GT - time elapsed        ", time_elapsed)
         print()
-        for ORDER in range(INTERACTION_ORDER + 1):
+        for ORDER in range(1, INTERACTION_ORDER + 1):
             print(f"GT - order {ORDER} SIs         ", ground_truth_shap_int[ORDER])
             print(f"GT - order {ORDER} sum SIs     ", ground_truth_shap_int[ORDER].sum())
             print()
