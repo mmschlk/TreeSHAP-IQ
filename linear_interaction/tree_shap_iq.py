@@ -220,7 +220,7 @@ class TreeShapIQ:
                 q_S, Q_S = {}, {}
                 for S, pos in zip(self.shapley_interactions_lookup,self.shapley_interactions_lookup.values()):
                     # compute interaction factor and polynomial for aggregation below
-                    q_S[S] = self._compute_p_e_interaction(S, p_e_storage)
+                    q_S[S] = self._compute_p_e_interaction_fast(S, p_e_storage)
                     if q_S[S] != 0:
                         Q_S[S] = self._compute_poly_interaction(S, p_e_storage)
                         # update interactions for all interactions that contain feature_id
@@ -656,6 +656,14 @@ class TreeShapIQ:
             p_e_interaction += (-1) ** (len(S) - len(L)) * p_e_prod
         return p_e_interaction
 
+    @staticmethod
+    def _compute_p_e_interaction_fast(S: tuple, p_e_values: np.ndarray[float]) -> float:
+        """Computes q_S (interaction factor) given p_e values"""
+        poly = Polynomial([1.])
+        for j in S:
+            poly = poly*Polynomial([p_e_values[j],-1])
+        return (-1)**len(S)*np.sum(poly.coef)
+
     def _compute_interventional_node_sample_weights(
             self,
             background_dataset: np.ndarray[float]
@@ -967,12 +975,12 @@ class TreeShapIQ:
 
 
 if __name__ == "__main__":
-    DO_TREE_SHAP = True
+    DO_TREE_SHAP = False
     DO_PLOTTING = False
     DO_OBSERVATIONAL = True
-    DO_GROUND_TRUTH = False
+    DO_GROUND_TRUTH = True
 
-    INTERACTION_ORDER = 1
+    INTERACTION_ORDER = 2
 
     if DO_TREE_SHAP:
         try:
@@ -992,7 +1000,7 @@ if __name__ == "__main__":
     np.random.seed(random_seed)
 
     # create dummy regression dataset and fit tree model
-    X, y = make_regression(1000, n_features=10)
+    X, y = make_regression(1000, n_features=15)
     clf = DecisionTreeRegressor(max_depth=50, random_state=random_seed).fit(X, y)
 
     x_input = X[:1]
