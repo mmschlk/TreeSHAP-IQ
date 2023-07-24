@@ -341,7 +341,7 @@ class TreeShapIQ:
                         Q_S[S] = self._compute_poly_interaction_fast(S, p_e_storage)
                         test = self._compute_poly_interaction(S, p_e_storage)
                         # update interactions for all interactions that contain feature_id
-                        self.shapley_interactions[pos] += q_S[S] * self._psi_fast(recursion_up[depth],self.D_powers[0],Q_S[S],self.Ns,current_height+1-len(S))
+                        self.shapley_interactions[pos] += q_S[S] * self._psi_fast(recursion_up[depth],self.D_powers[0],Q_S[S],self.Ns,current_height-len(S))
 
         else:  # not a leaf -> continue recursion
             self._compute_shapley_values_fast(x, left_child, recursion_down, recursion_up, p_e_storage.copy(), depth + 1)
@@ -360,7 +360,7 @@ class TreeShapIQ:
                 q_S[S] = self._compute_p_e_interaction(S, p_e_storage)
                 if q_S[S] != 0:
                     Q_S[S] = self._compute_poly_interaction_fast(S, p_e_storage)
-                    self.shapley_interactions[pos] += q_S[S] * self._psi_fast(recursion_up[depth],self.D_powers[0],Q_S[S],self.Ns,current_height+1-len(S))
+                    self.shapley_interactions[pos] += q_S[S] * self._psi_fast(recursion_up[depth],self.D_powers[0],Q_S[S],self.Ns,current_height-len(S))
                 # if the node has an ancestor, we need to update the interactions for the ancestor
                 ancestor_node_id = self.subset_ancestors[node_id][pos]
                 if ancestor_node_id > -1:
@@ -370,7 +370,7 @@ class TreeShapIQ:
                     q_S_ancestor[S] = self._compute_p_e_interaction(S, p_e_storage_ancestor)
                     if q_S_ancestor[S] != 0:
                         Q_S_ancestor[S] = self._compute_poly_interaction_fast(S, p_e_storage_ancestor)
-                        self.shapley_interactions[pos] -= q_S_ancestor[S] * self._psi_fast(recursion_up[depth],self.D_powers[ancestor_height-current_height],Q_S_ancestor[S],self.Ns,ancestor_height+1-len(S))
+                        self.shapley_interactions[pos] -= q_S_ancestor[S] * self._psi_fast(recursion_up[depth],self.D_powers[ancestor_height-current_height],Q_S_ancestor[S],self.Ns,ancestor_height-len(S))
 
 
 
@@ -985,9 +985,9 @@ class TreeShapIQ:
         inner_product = np.inner(polynomial.coef, binomial_polynomial.coef)
         return inner_product / (polynomial.degree() + 1)
 
-    def _psi_fast(self, E, D_power, quotient_poly, Ns, d):
-        n = Ns[d, :d]
-        return ((E * D_power / quotient_poly)[:d]).dot(n) / d
+    def _psi_fast(self, E, D_power, quotient_poly, Ns, degree):
+        n = Ns[degree+1, :degree+1]
+        return ((E * D_power / quotient_poly)[:degree+1]).dot(n) / (degree+1)
 
     def get_N(self, D):
         depth = D.shape[0]
