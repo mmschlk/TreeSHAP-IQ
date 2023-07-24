@@ -329,10 +329,12 @@ class TreeShapIQ:
             if self.has_ancestors[node_id]:
                 p_e_ancestor = self.p_e_values[ancestor_id] if activations[ancestor_id] else 0.
                 recursion_down[depth] = recursion_down[depth] / (self.D + p_e_ancestor)
+            else:
+                p_e_ancestor = 1. #no ancestor
         # if node is leaf -> add the empty prediction to the summary polynomial and store it
         if is_leaf:
             recursion_up[depth] = recursion_down[depth] * self.empty_predictions[node_id]
-            if 1 == 1:
+            if 1 == 0:
                 q_S, Q_S = {}, {}
                 for S, pos in zip(self.shapley_interactions_lookup,self.shapley_interactions_lookup.values()):
                     # compute interaction factor and polynomial for aggregation below
@@ -352,8 +354,8 @@ class TreeShapIQ:
         # upward computation of the shapley interactions
         # if node is not the root node -> update the shapley interactions
         # TODO here is where the errors are happenening :) (i think) lol
-        if 1 == 0: #deactivate
-        #if node_id is not self.root_node_id:
+        #if 1 == 0: #deactivate
+        if node_id is not self.root_node_id:
             q_S, Q_S, Q_S_ancestor, q_S_ancestor = {}, {}, {}, {}
             for pos, S in zip(self.subset_updates_pos[feature_id], self.subset_updates[feature_id]):
                 # compute interaction factor and polynomial for aggregation below
@@ -364,9 +366,9 @@ class TreeShapIQ:
                 # if the node has an ancestor, we need to update the interactions for the ancestor
                 ancestor_node_id = self.subset_ancestors[node_id][pos]
                 if ancestor_node_id > -1:
-                    ancestor_height = self.edge_heights[ancestor_id]
+                    ancestor_height = self.edge_heights[ancestor_node_id]
                     p_e_storage_ancestor = p_e_storage.copy()
-                    p_e_storage_ancestor[feature_id] = self.p_e_values[ancestor_id] if activations[ancestor_id] else 0.
+                    p_e_storage_ancestor[feature_id] = p_e_ancestor
                     q_S_ancestor[S] = self._compute_p_e_interaction(S, p_e_storage_ancestor)
                     if q_S_ancestor[S] != 0:
                         Q_S_ancestor[S] = self._compute_poly_interaction_fast(S, p_e_storage_ancestor)
