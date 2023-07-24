@@ -226,9 +226,9 @@ if __name__ == "__main__":
     from shap import TreeExplainer as Truth
     import numpy as np
     np.random.seed(10)
-    x, y = make_regression(10000, n_features=20)
-    max_depth = 30
-    clf = DecisionTreeRegressor(max_depth=max_depth).fit(x, y)
+    random_seed = 10
+    x, y = make_regression(1000, n_features=15)
+    clf = DecisionTreeRegressor(max_depth=50, random_state=random_seed).fit(x, y)
     sim = Truth(clf)
     mine_tree = copy_tree(clf.tree_)
     result = inference(mine_tree, x[:1])

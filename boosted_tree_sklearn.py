@@ -10,15 +10,17 @@ from linear_interaction.conversion import convert_tree_estimator
 from linear_interaction.tree_shap_iq import TreeShapIQ
 
 if __name__ == "__main__":
-    DO_TREE_SHAP = True
+    DO_TREE_SHAP = False
     DO_OBSERVATIONAL = True
     DO_GROUND_TRUTH = False
 
-    RANDOM_SEED = 42
-    INTERACTION_ORDER = 1
+    COMPUTATION_MODE = "fast-original"  # "original", "only_in_leaf", "only_in_leaf_fast"
 
-    X, y = make_regression(1000, n_features=50, random_state=RANDOM_SEED)
-    model = GradientBoostingRegressor(max_depth=50, random_state=RANDOM_SEED, n_estimators=20)
+    RANDOM_SEED = 42
+    INTERACTION_ORDER = 2
+
+    X, y = make_regression(1000, n_features=100, random_state=RANDOM_SEED)
+    model = GradientBoostingRegressor(max_depth=50, random_state=RANDOM_SEED, n_estimators=50)
     model.fit(X, y)
 
     # explanation datapoint
@@ -41,7 +43,7 @@ if __name__ == "__main__":
             observational=DO_OBSERVATIONAL
         )
         start_time = time.time()
-        explanation_scores = explainer.explain(x=x_explain, order=INTERACTION_ORDER)
+        explanation_scores = explainer.explain(x=x_explain, order=INTERACTION_ORDER, mode=COMPUTATION_MODE)
         explanation_time += time.time() - start_time
         ensemble_explanations.append(explanation_scores.copy())
         empty_prediction = empty_predictions.append(explainer.empty_prediction)
