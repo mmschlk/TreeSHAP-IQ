@@ -793,7 +793,7 @@ class TreeShapIQ:
     def _precompute_subsets_with_feature(self):
         subset_updates_pos: dict = {}  # stores position of interactions that include feature i
         subset_updates: dict = {}  # stores interactions that include feature i
-        #TODO: precompute separately, optimize runtime
+        #TODO: precompute separately, optimize runtime, compute within tree recursion
         for i in range(self.n_features):
             subsets = []
             positions = np.zeros(int(binom(self.n_features - 1, self.max_order - 1)), dtype=int)
