@@ -1,10 +1,13 @@
 """This module contains the linear TreeSHAP class, which is a reimplementation of the original TreeSHAP algorithm."""
 import time
+import typing
 
 import numpy as np
 from numpy.polynomial import Polynomial
 from numpy.polynomial.polynomial import polydiv
 from scipy.special import binom
+
+from linear_interaction.conversion import TreeModel
 
 try:
     from .utils import _get_parent_array, powerset
@@ -16,7 +19,7 @@ class TreeShapIQ:
 
     def __init__(
             self,
-            tree_model: dict,
+            tree_model: typing.Union[dict, TreeModel],
             max_interaction_order: int = 1,
             observational: bool = True,
             background_dataset: np.ndarray = None,
@@ -62,7 +65,8 @@ class TreeShapIQ:
         # get the node attributes from the tree_model definition
         self.children_left: np.ndarray[int] = tree_model["children_left"]  # -1 for leaf nodes
         self.children_right: np.ndarray[int] = tree_model["children_right"]  # -1 for leaf nodes
-        self.parents: np.ndarray[int] = _get_parent_array(self.children_left, self.children_right)  # -1 for the root node
+        self.parents: np.ndarray[int] = _get_parent_array(self.children_left,
+                                                          self.children_right)  # -1 for the root node
         self.features: np.ndarray = tree_model["features"]  # -2 for leaf nodes
         self.thresholds: np.ndarray = tree_model["thresholds"]  # -2 for leaf nodes
 
@@ -85,13 +89,15 @@ class TreeShapIQ:
         if observational:
             self.node_sample_weight = tree_model["node_sample_weight"]
         else:
-            raise NotImplementedError("Interventional Shapley interactions are not implemented yet.")
+            raise NotImplementedError(
+                "Interventional Shapley interactions are not implemented yet.")
             # TODO Interventional weights need to computed differently
 
-        #precompute subsets that include each feature and their positions
+        # precompute subsets that include each feature and their positions
         self.max_order: int = max_interaction_order
-        self.shapley_interactions: np.ndarray[float] = np.zeros(int(binom(self.n_features, self.max_order)), dtype=float)
-        self.shapley_interactions_lookup: dict = self._generate_interactions_lookup()
+        self.shapley_interactions: np.ndarray[float] = np.zeros(
+            int(binom(self.n_features, self.max_order)), dtype=float)
+        self.shapley_interactions_lookup: dict = self._generate_interactions_lookup(self.n_features, self.max_order)
         self.subset_updates, self.subset_updates_pos = self._precompute_subsets_with_feature()
 
         edge_tree: tuple = self.extract_edge_information_from_tree(max_interaction_order)
@@ -112,7 +118,7 @@ class TreeShapIQ:
         self.subset_ancestors: dict = {}
         self._precalculate_interaction_ancestors()
 
-        #improved calculations
+        # improved calculations
         self.D = np.polynomial.chebyshev.chebpts2(self.max_depth)
         self.D_powers = self.cache(self.D)
         self.D_powers_IP = self.cache(-self.D)
@@ -127,7 +133,7 @@ class TreeShapIQ:
             self,
             x: np.ndarray,
             order: int = 1,
-            mode: str = "only_in_leaf_fast"
+            mode: str = "superfast"
     ) -> np.ndarray[float]:
         """Computes the Shapley Interaction values for a given instance x and interaction order.
             This function is the main explanation function of this class.
@@ -135,7 +141,17 @@ class TreeShapIQ:
         Args:
             x (np.ndarray): Instance to be explained.
             order (int, optional): Order of the interactions. Defaults to 1.
-
+            mode (str, optional): The mode of the computation. The following modes are supported:
+                - "original": The original LinearTreeSHAP algorithm generalized to interactions.
+                - "leaf": The original LinearTreeSHAP algorithm generalized to interactions, but
+                    only computes the Shapley interactions in the leaf nodes.
+                - "interpolation-original": The original LinearTreeSHAP algorithm generalized to
+                    interactions, but uses interpolation to compute the summary polynomials.
+                - "interpolation-leaf": The original LinearTreeSHAP algorithm generalized to
+                    interactions, but uses interpolation to compute the summary polynomials and only
+                    computes the Shapley interactions in the leaf nodes.
+                - "superfast": The improved LinearTreeSHAP algorithm generalized to interactions.
+            Defaults to "superfast".
         Returns:
             np.ndarray[float]: Shapley Interaction values. The shape of the array is (n_features,
                 order).
@@ -145,17 +161,16 @@ class TreeShapIQ:
         self.shapley_interactions = np.zeros(int(binom(self.n_features, order)), dtype=float)
         # get an array index by the nodes
         initial_polynomial = Polynomial([1.])
-        initial_interpolation = self.D_powers[0].copy()
         # call the recursive function to compute the shapley values
         if mode == "original":
             self._compute_original(x, 0, initial_polynomial)
         elif mode == "leaf":
             self._compute_only_in_leaf(x, 0, initial_polynomial)
-        elif mode == "fast-original":
-            self._compute_shapley_values_fast(x, 0, original=True)
-        elif mode == "fast-leaf":
-            self._compute_shapley_values_fast(x, 0, original=False)
-        elif mode =="superfast":
+        elif mode == "interpolation-original":
+            self._compute_shapley_values_interpolation(x, 0, original=True)
+        elif mode == "interpolation-leaf":
+            self._compute_shapley_values_interpolation(x, 0, original=False)
+        elif mode == "superfast":
             self.D_order = np.polynomial.chebyshev.chebpts2(self.max_depth)
             self._compute_shapley_values_superfast(x, 0)
         else:
@@ -210,14 +225,16 @@ class TreeShapIQ:
             # remove previous polynomial factor if node has ancestors
             if self.has_ancestors[node_id]:
                 p_e_ancestor = self.p_e_values[ancestor_id] if activations[ancestor_id] else 0.
-                path_summary_poly = Polynomial(polydiv(path_summary_poly.coef, Polynomial([p_e_ancestor, 1]).coef)[0])
+                path_summary_poly = Polynomial(
+                    polydiv(path_summary_poly.coef, Polynomial([p_e_ancestor, 1]).coef)[0])
 
         # if node is leaf -> add the empty prediction to the summary polynomial and store it
         # if node is leaf -> compute the shapley interactions for the leaf node
         if is_leaf:
             self.summary_polynomials[node_id] = path_summary_poly * self.empty_predictions[node_id]
             q_S, Q_S = {}, {}
-            for S, pos in zip(self.shapley_interactions_lookup, self.shapley_interactions_lookup.values()):
+            for S, pos in zip(self.shapley_interactions_lookup,
+                              self.shapley_interactions_lookup.values()):
                 # compute interaction factor and polynomial for aggregation below
                 q_S[S] = self._compute_p_e_interaction_fast(S, p_e_storage)
                 if q_S[S] != 0:
@@ -259,11 +276,15 @@ class TreeShapIQ:
         if SP_up is None:
             SP_up = np.zeros((self.max_depth + 1, self.max_depth))
         if IP_down is None:
-            IP_down = np.zeros((self.max_depth + 1,int(binom(self.n_features,self.interaction_order)), self.max_depth))
-            IP_down[0,:] = 1
+            IP_down = np.zeros((self.max_depth + 1,
+                                int(binom(self.n_features, self.interaction_order)),
+                                self.max_depth))
+            IP_down[0, :] = 1
         if QP_down is None:
-            QP_down = np.zeros((self.max_depth + 1,int(binom(self.n_features,self.interaction_order)),self.max_depth))
-            QP_down[0,:] = 1
+            QP_down = np.zeros((self.max_depth + 1,
+                                int(binom(self.n_features, self.interaction_order)),
+                                self.max_depth))
+            QP_down[0, :] = 1
 
         # get node / edge information
         left_child, right_child = self.children_left[node_id], self.children_right[node_id]
@@ -275,8 +296,8 @@ class TreeShapIQ:
         activations = self.activations
         is_leaf = left_child < 0
         current_height, left_height, right_height = self.edge_heights[node_id], \
-                                                    self.edge_heights[left_child], \
-                                                    self.edge_heights[right_child]
+            self.edge_heights[left_child], \
+            self.edge_heights[right_child]
         if feature_id > -1:
             interaction_sets = self.subset_updates_pos[feature_id]
 
@@ -296,17 +317,21 @@ class TreeShapIQ:
             p_e_current = self.p_e_values[node_id] if activations[node_id] else 0.
             # update summary polynomial
             SP_down[depth] = SP_down[depth - 1] * (self.D + p_e_current)
-            #update other polynomials
-            QP_down[depth,:] = QP_down[depth-1,:].copy()
-            IP_down[depth,:] = IP_down[depth-1,:].copy()
-            QP_down[depth,interaction_sets] = QP_down[depth,interaction_sets] * (self.D + p_e_current)
-            IP_down[depth,interaction_sets] = IP_down[depth,interaction_sets] * (-self.D + p_e_current)
+            # update other polynomials
+            QP_down[depth, :] = QP_down[depth - 1, :].copy()
+            IP_down[depth, :] = IP_down[depth - 1, :].copy()
+            QP_down[depth, interaction_sets] = QP_down[depth, interaction_sets] * (
+                        self.D + p_e_current)
+            IP_down[depth, interaction_sets] = IP_down[depth, interaction_sets] * (
+                        -self.D + p_e_current)
             # remove previous polynomial factor if node has ancestors
             if self.has_ancestors[node_id]:
                 p_e_ancestor = self.p_e_values[ancestor_id] if activations[ancestor_id] else 0.
                 SP_down[depth] = SP_down[depth] / (self.D + p_e_ancestor)
-                QP_down[depth, interaction_sets] = QP_down[depth, interaction_sets] / (self.D + p_e_ancestor)
-                IP_down[depth, interaction_sets] = IP_down[depth, interaction_sets] / (-self.D + p_e_ancestor)
+                QP_down[depth, interaction_sets] = QP_down[depth, interaction_sets] / (
+                            self.D + p_e_ancestor)
+                IP_down[depth, interaction_sets] = IP_down[depth, interaction_sets] / (
+                            -self.D + p_e_ancestor)
             else:
                 p_e_ancestor = 1.  # no ancestor
         # if node is leaf -> add the empty prediction to the summary polynomial and store it
@@ -314,33 +339,40 @@ class TreeShapIQ:
             SP_up[depth] = SP_down[depth] * self.empty_predictions[node_id]
 
         else:  # not a leaf -> continue recursion
-            self._compute_shapley_values_superfast(x, left_child, SP_down, SP_up, IP_down, QP_down,depth + 1)
+            self._compute_shapley_values_superfast(x, left_child, SP_down, SP_up, IP_down, QP_down,
+                                                   depth + 1)
             SP_up[depth] = SP_up[depth + 1] * self.D_powers[current_height - left_height]
-            self._compute_shapley_values_superfast(x, right_child, SP_down, SP_up, IP_down, QP_down,depth + 1)
+            self._compute_shapley_values_superfast(x, right_child, SP_down, SP_up, IP_down, QP_down,
+                                                   depth + 1)
             SP_up[depth] += SP_up[depth + 1] * self.D_powers[current_height - right_height]
 
         if node_id is not self.root_node_id:
-            interactions_seen = interaction_sets[self.interaction_height[node_id][interaction_sets] == self.interaction_order]
+            interactions_seen = interaction_sets[
+                self.interaction_height[node_id][interaction_sets] == self.interaction_order]
             if len(interactions_seen) > 0:
-                self.shapley_interactions[interactions_seen] += (-1) ** (self.interaction_order) * \
-                                                                np.dot(IP_down[depth, interactions_seen],self.Ns_id[self.max_depth, :self.max_depth])\
-                                                                *self._psi_superfast(SP_up[depth,:], self.D_powers[0],QP_down[depth,interactions_seen], self.Ns, current_height - self.interaction_order)
-            #Ancestor handling
-            ancestor_node_id = self.subset_ancestors[node_id][interaction_sets] #ancestors of interactions
-            if np.mean(ancestor_node_id)>-1: #if there exist ancestors
+                # TODO ÄÄÄÄM :D
+                self.shapley_interactions[interactions_seen] += (-1) ** (self.interaction_order) * np.dot(IP_down[depth, interactions_seen], self.Ns_id[self.max_depth, :self.max_depth]) * self._psi_superfast(SP_up[depth, :], self.D_powers[0], QP_down[depth, interactions_seen], self.Ns, current_height - self.interaction_order)
+            # Ancestor handling
+            ancestor_node_id = self.subset_ancestors[node_id][
+                interaction_sets]  # ancestors of interactions
+            if np.mean(ancestor_node_id) > -1:  # if there exist ancestors
                 ancestor_node_id_exists = ancestor_node_id > -1
-                interactions_with_ancestor = interaction_sets[ancestor_node_id_exists] #interactions with ancestors
-                interactions_ancestors = ancestor_node_id[ancestor_node_id_exists] #ancestors of interactions with ancestor
-                #check if all features have been observed for this interaction, otherwise the update is zero
-                cond_interaction_seen = self.interaction_height[parent_id][interactions_with_ancestor] == self.interaction_order
-                interactions_with_ancestor_to_update = interactions_with_ancestor[cond_interaction_seen]
+                interactions_with_ancestor = interaction_sets[
+                    ancestor_node_id_exists]  # interactions with ancestors
+                interactions_ancestors = ancestor_node_id[
+                    ancestor_node_id_exists]  # ancestors of interactions with ancestor
+                # check if all features have been observed for this interaction, otherwise the update is zero
+                cond_interaction_seen = self.interaction_height[parent_id][
+                                            interactions_with_ancestor] == self.interaction_order
+                interactions_with_ancestor_to_update = interactions_with_ancestor[
+                    cond_interaction_seen]
                 if len(interactions_with_ancestor_to_update):
-                    ancestor_heights = self.edge_heights[interactions_ancestors[cond_interaction_seen]]
-                    self.shapley_interactions[interactions_with_ancestor_to_update] -= (-1)**(self.interaction_order)\
-                                                                              *np.dot(IP_down[depth - 1, interactions_with_ancestor_to_update],self.Ns_id[self.max_depth, :self.max_depth]) \
-                                                                              * self._psi_superfast_ancestor(SP_up[depth],self.D_powers[ancestor_heights - current_height],QP_down[depth - 1, interactions_with_ancestor_to_update],self.Ns,ancestor_heights-self.interaction_order)
+                    ancestor_heights = self.edge_heights[
+                        interactions_ancestors[cond_interaction_seen]]
+                    # TODO ÄÄÄÄM :D
+                    self.shapley_interactions[interactions_with_ancestor_to_update] -= (-1) ** (self.interaction_order) * np.dot(IP_down[depth - 1, interactions_with_ancestor_to_update], self.Ns_id[self.max_depth, :self.max_depth]) * self._psi_superfast_ancestor(SP_up[depth], self.D_powers[ancestor_heights - current_height], QP_down[depth - 1, interactions_with_ancestor_to_update], self.Ns, ancestor_heights - self.interaction_order)
 
-    def _compute_shapley_values_fast(
+    def _compute_shapley_values_interpolation(
             self,
             x: np.ndarray,
             node_id: int,
@@ -357,10 +389,10 @@ class TreeShapIQ:
         if p_e_storage is None:
             p_e_storage = np.ones(self.n_features, dtype=float)
         if recursion_down is None:
-            recursion_down = np.zeros((self.max_depth+1, self.max_depth))
+            recursion_down = np.zeros((self.max_depth + 1, self.max_depth))
             recursion_down[0, :] = 1
         if recursion_up is None:
-            recursion_up = np.zeros((self.max_depth+1, self.max_depth))
+            recursion_up = np.zeros((self.max_depth + 1, self.max_depth))
 
         # get node / edge information
         left_child, right_child = self.children_left[node_id], self.children_right[node_id]
@@ -371,7 +403,8 @@ class TreeShapIQ:
         feature_threshold = self.thresholds[node_id]
         activations = self.activations
         is_leaf = left_child < 0
-        current_height, left_height, right_height = self.edge_heights[node_id], self.edge_heights[left_child], self.edge_heights[right_child]
+        current_height, left_height, right_height = self.edge_heights[node_id], self.edge_heights[
+            left_child], self.edge_heights[right_child]
 
         # if node is not a leaf -> set activations for children nodes accordingly
         if not is_leaf:
@@ -389,7 +422,7 @@ class TreeShapIQ:
             p_e_current = self.p_e_values[node_id] if activations[node_id] else 0.
             p_e_storage[feature_id] = p_e_current
             # update summary polynomial
-            recursion_down[depth] = recursion_down[depth-1] * (self.D + p_e_current)
+            recursion_down[depth] = recursion_down[depth - 1] * (self.D + p_e_current)
             # remove previous polynomial factor if node has ancestors
             if self.has_ancestors[node_id]:
                 p_e_ancestor = self.p_e_values[ancestor_id] if activations[ancestor_id] else 0.
@@ -401,32 +434,42 @@ class TreeShapIQ:
             recursion_up[depth] = recursion_down[depth] * self.empty_predictions[node_id]
             if not original:
                 q_S, Q_S = {}, {}
-                for S, pos in zip(self.shapley_interactions_lookup,self.shapley_interactions_lookup.values()):
+                for S, pos in zip(self.shapley_interactions_lookup,
+                                  self.shapley_interactions_lookup.values()):
                     # compute interaction factor and polynomial for aggregation below
                     q_S[S] = self._compute_p_e_interaction(S, p_e_storage)
                     if q_S[S] != 0:
                         Q_S[S] = self._compute_poly_interaction_fast(S, p_e_storage)
                         test = self._compute_poly_interaction(S, p_e_storage)
                         # update interactions for all interactions that contain feature_id
-                        self.shapley_interactions[pos] += q_S[S] * self._psi_fast(recursion_up[depth],self.D_powers[0],Q_S[S],self.Ns,current_height-len(S))
+                        self.shapley_interactions[pos] += q_S[S] * self._psi_fast(
+                            recursion_up[depth], self.D_powers[0], Q_S[S], self.Ns,
+                            current_height - len(S))
 
         else:  # not a leaf -> continue recursion
-            self._compute_shapley_values_fast(x, left_child, original, recursion_down, recursion_up, p_e_storage.copy(), depth + 1)
-            recursion_up[depth] = recursion_up[depth+1]*self.D_powers[current_height-left_height]
-            self._compute_shapley_values_fast(x, right_child, original, recursion_down, recursion_up, p_e_storage.copy(), depth + 1)
-            recursion_up[depth] += recursion_up[depth+1]*self.D_powers[current_height-right_height]
+            self._compute_shapley_values_interpolation(x, left_child, original, recursion_down, recursion_up,
+                                                       p_e_storage.copy(), depth + 1)
+            recursion_up[depth] = recursion_up[depth + 1] * self.D_powers[
+                current_height - left_height]
+            self._compute_shapley_values_interpolation(x, right_child, original, recursion_down,
+                                                       recursion_up, p_e_storage.copy(), depth + 1)
+            recursion_up[depth] += recursion_up[depth + 1] * self.D_powers[
+                current_height - right_height]
 
         # upward computation of the shapley interactions
         # if node is not the root node -> update the shapley interactions
         if original:
             if node_id is not self.root_node_id:
                 q_S, Q_S, Q_S_ancestor, q_S_ancestor = {}, {}, {}, {}
-                for pos, S in zip(self.subset_updates_pos[feature_id], self.subset_updates[feature_id]):
+                for pos, S in zip(self.subset_updates_pos[feature_id],
+                                  self.subset_updates[feature_id]):
                     # compute interaction factor and polynomial for aggregation below
                     q_S[S] = self._compute_p_e_interaction(S, p_e_storage)
                     if q_S[S] != 0:
                         Q_S[S] = self._compute_poly_interaction_fast(S, p_e_storage)
-                        self.shapley_interactions[pos] += q_S[S] * self._psi_fast(recursion_up[depth],self.D_powers[0],Q_S[S],self.Ns,current_height-len(S))
+                        self.shapley_interactions[pos] += q_S[S] * self._psi_fast(
+                            recursion_up[depth], self.D_powers[0], Q_S[S], self.Ns,
+                            current_height - len(S))
                     # if the node has an ancestor, we need to update the interactions for the ancestor
                     ancestor_node_id = self.subset_ancestors[node_id][pos]
                     if ancestor_node_id > -1:
@@ -435,8 +478,12 @@ class TreeShapIQ:
                         p_e_storage_ancestor[feature_id] = p_e_ancestor
                         q_S_ancestor[S] = self._compute_p_e_interaction(S, p_e_storage_ancestor)
                         if q_S_ancestor[S] != 0:
-                            Q_S_ancestor[S] = self._compute_poly_interaction_fast(S, p_e_storage_ancestor)
-                            self.shapley_interactions[pos] -= q_S_ancestor[S] * self._psi_fast(recursion_up[depth],self.D_powers[ancestor_height-current_height],Q_S_ancestor[S],self.Ns,ancestor_height-len(S))
+                            Q_S_ancestor[S] = self._compute_poly_interaction_fast(S,
+                                                                                  p_e_storage_ancestor)
+                            self.shapley_interactions[pos] -= q_S_ancestor[S] * self._psi_fast(
+                                recursion_up[depth],
+                                self.D_powers[ancestor_height - current_height], Q_S_ancestor[S],
+                                self.Ns, ancestor_height - len(S))
 
     def _compute_original(
             self,
@@ -487,7 +534,8 @@ class TreeShapIQ:
             # remove previous polynomial factor if node has ancestors
             if self.has_ancestors[node_id]:
                 p_e_ancestor = self.p_e_values[ancestor_id] if activations[ancestor_id] else 0.
-                path_summary_poly = Polynomial(polydiv(path_summary_poly.coef, Polynomial([p_e_ancestor, 1]).coef)[0])
+                path_summary_poly = Polynomial(
+                    polydiv(path_summary_poly.coef, Polynomial([p_e_ancestor, 1]).coef)[0])
 
         # if node is leaf -> add the empty prediction to the summary polynomial and store it
         if is_leaf:
@@ -545,9 +593,9 @@ class TreeShapIQ:
         'max_interaction'.
 
         Args:
-            max_interaction (int, optional): The maximum interaction order to be computed. An interaction
-                order of 1 corresponds to the Shapley value. Any value higher than 1 computes the
-                Shapley interactions values up to that order. Defaults to 1 (i.e. SV).
+            max_interaction (int, optional): The maximum interaction order to be computed. An
+                interaction order of 1 corresponds to the Shapley value. Any value higher than 1
+                computes the Shapley interactions values up to that order. Defaults to 1 (i.e. SV).
             min_interaction (int, optional): The minimum interaction order to be computed. Defaults
                 to 1.
 
@@ -584,11 +632,12 @@ class TreeShapIQ:
         empty_predictions: np.ndarray[float] = np.zeros(n_nodes, dtype=float)
         edge_heights: np.ndarray[int] = np.full_like(children_left, -1, dtype=int)
         max_depth: list[int] = [0]
-        interaction_height = np.zeros((n_nodes,int(binom(self.n_features, max_interaction))),dtype=int)
+        interaction_height = np.zeros((n_nodes, int(binom(self.n_features, max_interaction))),
+                                      dtype=int)
 
         features_last_seen_in_tree: dict[int, int] = {}
 
-        last_feature_node_in_path: np.ndarray[bool] = np.full_like(children_left,False,dtype=bool)
+        last_feature_node_in_path: np.ndarray[bool] = np.full_like(children_left, False, dtype=bool)
 
         def recursive_search(
                 node_id: int = 0,
@@ -625,8 +674,10 @@ class TreeShapIQ:
 
             # if root_node, step into the tree and end recursion
             if node_id == 0:
-                edge_heights_left = recursive_search(left_child, depth + 1, prod_weight, seen_features.copy())
-                edge_heights_right = recursive_search(right_child, depth + 1, prod_weight, seen_features.copy())
+                edge_heights_left = recursive_search(left_child, depth + 1, prod_weight,
+                                                     seen_features.copy())
+                edge_heights_right = recursive_search(right_child, depth + 1, prod_weight,
+                                                      seen_features.copy())
                 edge_heights[node_id] = max(edge_heights_left, edge_heights_right)
                 return edge_heights[node_id]  # final return ending the recursion
 
@@ -637,7 +688,7 @@ class TreeShapIQ:
             # get the feature id of the current node
             feature_id = features[parents[node_id]]
 
-            #Assume it is the last occurrence of feature
+            # Assume it is the last occurrence of feature
             last_feature_node_in_path[node_id] = True
 
             # compute prod_weight with node samples
@@ -650,13 +701,13 @@ class TreeShapIQ:
             # calculate the p_e value of the current node
             p_e = 1 / weight
 
-            #copy parent height information
+            # copy parent height information
             interaction_height[node_id] = interaction_height[parents[node_id]].copy()
             # correct if feature was seen before
             if seen_features[feature_id] > -1:  # feature has been seen before in the path
                 ancestor_id = seen_features[feature_id]  # get ancestor node with same feature
                 ancestors[node_id] = ancestor_id  # store ancestor node
-                last_feature_node_in_path[ancestor_id] = False #correct previous assumption
+                last_feature_node_in_path[ancestor_id] = False  # correct previous assumption
                 p_e *= p_e_values[ancestor_id]  # add ancestor weight to p_e
             else:
                 interaction_height[node_id][self.subset_updates_pos[feature_id]] += 1
@@ -673,22 +724,19 @@ class TreeShapIQ:
 
             # update the edge heights
             if not is_leaf:  # if node is not a leaf, continue recursion
-                edge_heights_left = recursive_search(left_child, depth + 1, prod_weight, seen_features.copy())
-                edge_heights_right = recursive_search(right_child, depth + 1, prod_weight, seen_features.copy())
+                edge_heights_left = recursive_search(left_child, depth + 1, prod_weight,
+                                                     seen_features.copy())
+                edge_heights_right = recursive_search(right_child, depth + 1, prod_weight,
+                                                      seen_features.copy())
                 edge_heights[node_id] = max(edge_heights_left, edge_heights_right)
             else:  # if node is a leaf, end recursion
                 edge_heights[node_id] = np.sum(seen_features > -1)
                 empty_predictions[node_id] = prod_weight * values[node_id]
             return edge_heights[node_id]  # return upwards in the recursion
 
-        def compute_the_updatable_interaction_subsets():
-            """Uses the information about what features were seen last in the tree to compute
-                what interactions/subsets will no longer change for the rest of the tree."""
-            pass
-
         _ = recursive_search()
-        return parents, ancestors, ancestor_nodes, p_e_values, p_e_storages, split_weights, empty_predictions, edge_heights, max_depth[0], last_feature_node_in_path, interaction_height
-
+        return parents, ancestors, ancestor_nodes, p_e_values, p_e_storages, split_weights, empty_predictions, edge_heights, \
+        max_depth[0], last_feature_node_in_path, interaction_height
 
     @staticmethod
     def _all_interactions(
@@ -709,6 +757,7 @@ class TreeShapIQ:
             x: np.ndarray,
             max_order: int = 1
     ):
+        """Computes the Shapley values and interactions using brute force method (enumeration)."""
         self.shapley_values: np.ndarray = np.zeros(self.n_features, dtype=float)
 
         # Evaluate model for every subset
@@ -744,7 +793,8 @@ class TreeShapIQ:
         for S in powerset(features, order):
             temp_values = 0
             for T in powerset(set(features) - set(S)):
-                weight_T = 1 / (binom(self.n_features - order, len(T)) * (self.n_features - order + 1))
+                weight_T = 1 / (
+                            binom(self.n_features - order, len(T)) * (self.n_features - order + 1))
                 for L in powerset(S):
                     subset = tuple(sorted(L + T))
                     pos = position_lookup[subset]
@@ -769,23 +819,29 @@ class TreeShapIQ:
             if feature_id in S:
                 if x[feature_id] <= threshold:
                     subset_val_right = 0
-                    subset_val_left = self._naive_shapley_recursion(x, S, self.children_left[node_id], weight)
+                    subset_val_left = self._naive_shapley_recursion(x, S,
+                                                                    self.children_left[node_id],
+                                                                    weight)
                 else:
                     subset_val_left = 0
-                    subset_val_right = self._naive_shapley_recursion(x, S, self.children_right[node_id], weight)
+                    subset_val_right = self._naive_shapley_recursion(x, S,
+                                                                     self.children_right[node_id],
+                                                                     weight)
             else:
                 subset_val_left = self._naive_shapley_recursion(
-                    x, S, self.children_left[node_id], weight * self.weights[self.children_left[node_id]])
+                    x, S, self.children_left[node_id],
+                    weight * self.weights[self.children_left[node_id]])
                 subset_val_right = self._naive_shapley_recursion(
-                    x, S, self.children_right[node_id], weight * self.weights[self.children_right[node_id]])
+                    x, S, self.children_right[node_id],
+                    weight * self.weights[self.children_right[node_id]])
         return subset_val_left + subset_val_right
 
-    def _generate_interactions_lookup(self):
-        #TODO: maybe move outside of class
-        # stores position of interactions
-        counter_interaction = 0
+    @staticmethod
+    def _generate_interactions_lookup(n_features, max_order):
+        # TODO: maybe move outside of class
+        counter_interaction = 0  # stores position of interactions
         shapley_interactions_lookup: dict = {}
-        for S in powerset(range(self.n_features), self.max_order):
+        for S in powerset(range(n_features), max_order):
             shapley_interactions_lookup[S] = counter_interaction
             counter_interaction += 1
         return shapley_interactions_lookup
@@ -793,12 +849,13 @@ class TreeShapIQ:
     def _precompute_subsets_with_feature(self):
         subset_updates_pos: dict = {}  # stores position of interactions that include feature i
         subset_updates: dict = {}  # stores interactions that include feature i
-        #TODO: precompute separately, optimize runtime, compute within tree recursion
+        # TODO: precompute separately, optimize runtime, compute within tree recursion
         for i in range(self.n_features):
             subsets = []
             positions = np.zeros(int(binom(self.n_features - 1, self.max_order - 1)), dtype=int)
             pos_counter = 0
-            for S in powerset(range(self.n_features), min_size=self.max_order, max_size=self.max_order):
+            for S in powerset(range(self.n_features), min_size=self.max_order,
+                              max_size=self.max_order):
                 if i in S:
                     positions[pos_counter] = self.shapley_interactions_lookup[S]
                     subsets.append(S)
@@ -815,16 +872,16 @@ class TreeShapIQ:
         counter_interaction = 0
 
         for node_id in self.nodes[1:]:  # for all nodes except the root node
-            self.subset_ancestors[node_id] = np.full(int(binom(self.n_features, self.max_order)), -1, dtype=int)
+            self.subset_ancestors[node_id] = np.full(int(binom(self.n_features, self.max_order)),
+                                                     -1, dtype=int)
         for S in powerset(range(self.n_features), self.max_order):
-            #self.shapley_interactions_lookup[S] = counter_interaction
+            # self.shapley_interactions_lookup[S] = counter_interaction
             for node_id in self.nodes[1:]:  # for all nodes except the root node
                 subset_ancestor = -1
                 for i in S:
                     subset_ancestor = max(subset_ancestor, self.ancestor_nodes[node_id][i])
                 self.subset_ancestors[node_id][counter_interaction] = subset_ancestor
             counter_interaction += 1
-
 
     @staticmethod
     def _compute_poly_interaction(S: tuple, p_e_values: np.ndarray[float]) -> Polynomial:
@@ -908,18 +965,18 @@ class TreeShapIQ:
         return inner_product / (polynomial.degree() + 1)
 
     def _psi_fast(self, E, D_power, quotient_poly, Ns, degree):
-        n = Ns[degree+1, :degree+1]
-        return ((E * D_power / quotient_poly)[:degree+1]).dot(n) / (degree+1)
+        n = Ns[degree + 1, :degree + 1]
+        return ((E * D_power / quotient_poly)[:degree + 1]).dot(n) / (degree + 1)
 
     def _psi_superfast(self, E, D_power, quotient_poly, Ns, degree):
         d = degree + 1
         n = Ns[d, :d]
-        return ((E * D_power/ quotient_poly)[:,:d]).dot(n) / (d)
+        return ((E * D_power / quotient_poly)[:, :d]).dot(n) / d
 
     def _psi_superfast_ancestor(self, E, D_power, quotient_poly, Ns, degree):
-        #Variant of _psi_superfast that can deal with multiple inputs in degree
-        #TODO: check if improvement can be done for matrix multiplication instead of diag
-        return np.diag((E*D_power/quotient_poly).dot(Ns[degree+1].T)) / (degree+1)
+        # Variant of _psi_superfast that can deal with multiple inputs in degree
+        # TODO: check if improvement can be done for matrix multiplication instead of diag
+        return np.diag((E * D_power / quotient_poly).dot(Ns[degree + 1].T)) / (degree + 1)
 
     def get_N(self, D):
         depth = D.shape[0]
@@ -944,12 +1001,12 @@ class TreeShapIQ:
 
 if __name__ == "__main__":
     DO_TREE_SHAP = True
-    DO_PLOTTING = True
+    DO_PLOTTING = False
     DO_OBSERVATIONAL = True
     DO_GROUND_TRUTH = True
-    COMPUTATION_MODE = "superfast" #"fast-original"  # "original", "leaf", "fast-original", "fast-leaf"
+    COMPUTATION_MODE = "superfast"  # "superfast", "original", "leaf", "interpolation-original", "interpolation-leaf"
 
-    INTERACTION_ORDER = 2
+    INTERACTION_ORDER = 1
 
     if DO_TREE_SHAP:
         try:
@@ -970,7 +1027,7 @@ if __name__ == "__main__":
 
     # create dummy regression dataset and fit tree model
     X, y = make_regression(1000, n_features=15)
-    clf = DecisionTreeRegressor(max_depth=50, random_state=random_seed).fit(X, y)
+    clf = DecisionTreeRegressor(max_depth=5, random_state=random_seed).fit(X, y)
 
     x_input = X[:1]
     print("Output f(x):", clf.predict(x_input)[0])
@@ -1066,9 +1123,11 @@ if __name__ == "__main__":
         # explain the tree with observational TreeSHAP
         start_time = time.time()
         if DO_OBSERVATIONAL:
-            explainer_shap = TreeExplainer(deepcopy(model), feature_perturbation="tree_path_dependent")
+            explainer_shap = TreeExplainer(deepcopy(model),
+                                           feature_perturbation="tree_path_dependent")
         else:
-            explainer_shap = TreeExplainer(deepcopy(model), feature_perturbation="interventional", data=X[:50])
+            explainer_shap = TreeExplainer(deepcopy(model), feature_perturbation="interventional",
+                                           data=X[:50])
 
         sv_tree_shap = explainer_shap.shap_values(x_input)
         time_elapsed = time.time() - start_time
