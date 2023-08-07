@@ -351,7 +351,7 @@ class TreeShapIQ:
                 self.interaction_height[node_id][interaction_sets] == self.interaction_order]
             if len(interactions_seen) > 0:
                 # TODO ÄÄÄÄM :D
-                self.shapley_interactions[interactions_seen] += (-1) ** (self.interaction_order) * np.dot(IP_down[depth, interactions_seen], self.Ns_id[self.max_depth, :self.max_depth]) * self._psi_superfast(SP_up[depth, :], self.D_powers[0], QP_down[depth, interactions_seen], self.Ns, current_height - self.interaction_order)
+                self.shapley_interactions[interactions_seen] += np.dot(IP_down[depth, interactions_seen], self.Ns_id[self.max_depth, :self.max_depth]) * self._psi_superfast(SP_up[depth, :], self.D_powers[0], QP_down[depth, interactions_seen], self.Ns, current_height - self.interaction_order)
             # Ancestor handling
             ancestor_node_id = self.subset_ancestors[node_id][
                 interaction_sets]  # ancestors of interactions
@@ -370,7 +370,7 @@ class TreeShapIQ:
                     ancestor_heights = self.edge_heights[
                         interactions_ancestors[cond_interaction_seen]]
                     # TODO ÄÄÄÄM :D
-                    self.shapley_interactions[interactions_with_ancestor_to_update] -= (-1) ** (self.interaction_order) * np.dot(IP_down[depth - 1, interactions_with_ancestor_to_update], self.Ns_id[self.max_depth, :self.max_depth]) * self._psi_superfast_ancestor(SP_up[depth], self.D_powers[ancestor_heights - current_height], QP_down[depth - 1, interactions_with_ancestor_to_update], self.Ns, ancestor_heights - self.interaction_order)
+                    self.shapley_interactions[interactions_with_ancestor_to_update] -= np.dot(IP_down[depth - 1, interactions_with_ancestor_to_update], self.Ns_id[self.max_depth, :self.max_depth]) * self._psi_superfast_ancestor(SP_up[depth], self.D_powers[ancestor_heights - current_height], QP_down[depth - 1, interactions_with_ancestor_to_update], self.Ns, ancestor_heights - self.interaction_order)
 
     def _compute_shapley_values_interpolation(
             self,
