@@ -164,7 +164,7 @@ class TreeShapIQ:
     def explain(
             self,
             x: np.ndarray,
-            order: int = 1,
+            order: int = None,
             min_order: int = 1
     ) -> dict[int, np.ndarray[float]]:
         """Computes the Shapley Interaction values for a given instance x and interaction order.
@@ -172,13 +172,15 @@ class TreeShapIQ:
 
         Args:
             x (np.ndarray): Instance to be explained.
-            order (int, optional): Order of the interactions. Defaults to 1.
+            order (int, optional): Order of the interactions. Defaults to max_order from init.
             min_order (int, optional): Minimum order of the interactions. Defaults to 1.
 
         Returns:
             np.ndarray[float]: Shapley Interaction values. The shape of the array is (n_features,
                 order).
         """
+        if order is None:
+            order = self.max_order
         assert order <= self.max_order, f"Order {order} is larger than the maximum interaction " \
                                         f"order {self.max_order}."
         interactions = {}

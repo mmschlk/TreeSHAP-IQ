@@ -11,7 +11,7 @@ def safe_isinstance(obj, class_path_str):
     # Copied from shap repo
     """
     Acts as a safe version of isinstance without having to explicitly
-    import packages which may not exist in the users environment.
+    import packages which may not exist in the user's environment.
 
     Checks if obj is an instance of type specified by class_path_str.
 
@@ -150,7 +150,7 @@ def convert_tree_estimator(
             empty_prediction /= len(tree_model.estimators_)  # we distribute the empty prediction to all trees equally
         return [
             # GradientBoostedClassifier contains DecisionTreeRegressor as base_estimators
-            convert_tree_estimator(tree, scaling=learning_rate, class_label=None, empty_prediction=None)
+            convert_tree_estimator(tree, scaling=learning_rate, class_label=None, empty_prediction=empty_prediction)
             for tree in tree_model.estimators_[:, 0]
         ]
     if safe_isinstance(tree_model, "sklearn.ensemble.RandomForestRegressor") or \
