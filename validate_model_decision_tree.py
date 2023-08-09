@@ -58,7 +58,7 @@ if __name__ == "__main__":
         max_interaction_order=INTERACTION_ORDER
     )
     start_time = time.time()
-    sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER)[INTERACTION_ORDER]
+    sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER, min_order=INTERACTION_ORDER)[INTERACTION_ORDER]
     time_elapsed = time.time() - start_time
 
     print("Linear")

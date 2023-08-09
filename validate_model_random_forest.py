@@ -6,13 +6,13 @@ from sklearn.ensemble import RandomForestRegressor
 import numpy as np
 
 from linear_interaction.conversion import convert_tree_estimator
-from linear_interaction.old import TreeShapIQ
+from linear_interaction.tree_shap_iq import TreeShapIQ
 
 if __name__ == "__main__":
     DO_TREE_SHAP = True
     DO_OBSERVATIONAL = True
 
-    INTERACTION_ORDER = 2
+    INTERACTION_ORDER = 1
 
     if DO_TREE_SHAP:
         try:
