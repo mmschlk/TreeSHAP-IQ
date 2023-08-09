@@ -1,11 +1,13 @@
 import sys
 from dataclasses import dataclass
 from typing import Union
+from copy import deepcopy
 
 import numpy as np
 
 
 def safe_isinstance(obj, class_path_str):
+    # Copied from shap repo
     """
     Acts as a safe version of isinstance without having to explicitly
     import packages which may not exist in the users environment.
@@ -69,6 +71,7 @@ class TreeModel:
     thresholds: np.ndarray[float]
     values: np.ndarray[float]
     node_sample_weight: np.ndarray[float]
+    empty_prediction: float = None
 
     def __getitem__(self, item):
         return getattr(self, item)
@@ -77,7 +80,8 @@ class TreeModel:
 def convert_tree_estimator(
         tree_model,
         scaling: float = 1.,
-        class_label: int = None
+        class_label: int = None,
+        empty_prediction: float = None
 ) -> Union[TreeModel, list[TreeModel]]:
     """Converts a tree estimator to a dictionary or a list of dictionaries.
 
@@ -85,6 +89,10 @@ def convert_tree_estimator(
         tree_model: The tree estimator to be converted.
         scaling (float): The scaling factor to be applied to the leaf values. Must be in range
             (0, inf+]. Defaults to 1.
+        class_label (int): The class label to be explained. Only applicable for classification
+            problems. Defaults to None.
+        empty_prediction (float): The prediction of the tree model when the input is empty.
+            Defaults to None.
 
     Returns:
         Union[TreeModel, list[TreeModel]]: The converted tree estimator as either a mapping of node
@@ -103,16 +111,34 @@ def convert_tree_estimator(
             features=tree_model.tree_.feature,
             thresholds=tree_model.tree_.threshold,
             values=tree_values,
-            node_sample_weight=tree_model.tree_.weighted_n_node_samples
+            node_sample_weight=tree_model.tree_.weighted_n_node_samples,
+            empty_prediction=empty_prediction
         )
 
     if safe_isinstance(tree_model, "sklearn.ensemble.GradientBoostingRegressor") or \
             safe_isinstance(tree_model, "sklearn.ensemble.GradientBoostingClassifier"):
         learning_rate = tree_model.learning_rate
+        if empty_prediction is None:
+            if safe_isinstance(tree_model.init_, ["sklearn.ensemble.MeanEstimator", "sklearn.ensemble.gradient_boosting.MeanEstimator"]):
+                empty_prediction = deepcopy(tree_model.init_.mean)
+            elif safe_isinstance(tree_model.init_, ["sklearn.ensemble.QuantileEstimator", "sklearn.ensemble.gradient_boosting.QuantileEstimator"]):
+                empty_prediction = deepcopy(tree_model.init_.quantile)
+            elif safe_isinstance(tree_model.init_, "sklearn.dummy.DummyRegressor"):
+                empty_prediction = deepcopy(tree_model.init_.constant_[0])
+            else:
+                assert False, "Unsupported init model type: " + str(type(tree_model.init_))
+            empty_prediction /= len(tree_model.estimators_)  # we distribute the empty prediction to all trees equally
         return [
             # GradientBoostedClassifier contains DecisionTreeRegressor as base_estimators
-            convert_tree_estimator(tree, scaling=learning_rate, class_label=None)
+            convert_tree_estimator(tree, scaling=learning_rate, class_label=None, empty_prediction=None)
             for tree in tree_model.estimators_[:, 0]
+        ]
+    if safe_isinstance(tree_model, "sklearn.ensemble.RandomForestRegressor") or \
+            safe_isinstance(tree_model, "sklearn.ensemble.RandomForestClassifier"):
+        scaling = 1.0 / len(tree_model.estimators_)
+        return [
+            convert_tree_estimator(tree, scaling=scaling, class_label=class_label)
+            for tree in tree_model.estimators_
         ]
 
     # TODO add support for classification by providing class label
