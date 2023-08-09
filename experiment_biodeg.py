@@ -7,8 +7,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import GradientBoostingClassifier
 from tqdm import tqdm
 
-from linear_interaction.conversion import convert_tree_estimator
-from linear_interaction.tree_shap_iq import TreeShapIQ
+from tree_shap_iq.conversion import convert_tree_estimator
+from tree_shap_iq.base import TreeShapIQ
 
 if __name__ == "__main__":
 
