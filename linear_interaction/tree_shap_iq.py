@@ -155,7 +155,13 @@ class TreeShapIQ:
         self.activations: np.ndarray[bool] = np.zeros(self.n_nodes, dtype=bool)
 
     def _prepare_variables_for_order(self, interaction_order: int):
-        """Retrieves the precomputed variables for a given interaction order."""
+        """Retrieves the precomputed variables for a given interaction order. This function is
+            called before the recursive explanation function is called.
+
+        Args:
+            interaction_order (int): The interaction order for which the storage variables should be
+                loaded.
+        """
         self.subset_updates_pos = self.subset_updates_pos_store[interaction_order]
         self.subset_ancestors = self.subset_ancestors_store[interaction_order]
         self.D = self.D_store[interaction_order]
@@ -169,6 +175,7 @@ class TreeShapIQ:
             self,
             x: np.ndarray,
             order: int = 1,
+            min_order: int = 1
     ) -> dict[int, np.ndarray[float]]:
         """Computes the Shapley Interaction values for a given instance x and interaction order.
             This function is the main explanation function of this class.
@@ -176,6 +183,8 @@ class TreeShapIQ:
         Args:
             x (np.ndarray): Instance to be explained.
             order (int, optional): Order of the interactions. Defaults to 1.
+            min_order (int, optional): Minimum order of the interactions. Defaults to 1.
+
         Returns:
             np.ndarray[float]: Shapley Interaction values. The shape of the array is (n_features,
                 order).
@@ -183,7 +192,7 @@ class TreeShapIQ:
         assert order <= self.max_order, f"Order {order} is larger than the maximum interaction " \
                                         f"order {self.max_order}."
         interactions = {}
-        for order in range(1, order + 1):
+        for order in range(min_order, order + 1):
             self.shapley_interactions = np.zeros(int(binom(self.n_features, order)), dtype=float)
             self._prepare_variables_for_order(interaction_order=order)
             # call the recursive function to compute the shapley values
