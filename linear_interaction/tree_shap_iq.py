@@ -113,7 +113,7 @@ class TreeShapIQ:
         self.shapley_interactions_lookup: dict = self._generate_interactions_lookup(self.n_features, self.max_order)
         self.subset_updates, self.subset_updates_pos = self._precompute_subsets_with_feature()
 
-        edge_tree: EdgeTree = self.extract_edge_information_from_tree(max_interaction_order)
+        edge_tree: EdgeTree = self.extract_edge_information_from_tree(max_interaction=max_interaction_order)
         self.parents = edge_tree.parents
         self.ancestors = edge_tree.ancestors
         self.ancestor_nodes = edge_tree.ancestor_nodes
@@ -565,8 +565,7 @@ class TreeShapIQ:
             subsets = []
             positions = np.zeros(int(binom(self.n_features - 1, self.max_order - 1)), dtype=int)
             pos_counter = 0
-            for S in powerset(range(self.n_features), min_size=self.max_order,
-                              max_size=self.max_order):
+            for S in powerset(range(self.n_features), min_size=self.max_order, max_size=self.max_order):
                 if i in S:
                     positions[pos_counter] = self.shapley_interactions_lookup[S]
                     subsets.append(S)
