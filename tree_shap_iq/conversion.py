@@ -4,7 +4,7 @@ from typing import Union
 from copy import deepcopy
 
 import numpy as np
-from scipy.special import binom
+from scipy.special import binom, logit
 
 
 def safe_isinstance(obj, class_path_str):
@@ -135,8 +135,26 @@ def convert_tree_estimator(
             empty_prediction=empty_prediction
         )
 
-    if safe_isinstance(tree_model, "sklearn.ensemble.GradientBoostingRegressor") or \
-            safe_isinstance(tree_model, "sklearn.ensemble.GradientBoostingClassifier"):
+    if safe_isinstance(tree_model, "sklearn.ensemble.GradientBoostingClassifier"):
+        learning_rate = tree_model.learning_rate
+        if safe_isinstance(tree_model.init_, [
+            "sklearn.ensemble.LogOddsEstimator",
+            "sklearn.ensemble.gradient_boosting.LogOddsEstimator"
+        ]):
+            empty_prediction = deepcopy(tree_model.init_.prior[class_label])
+        elif safe_isinstance(tree_model.init_, "sklearn.dummy.DummyClassifier"):
+            empty_prediction = logit(tree_model.init_.class_prior_[class_label])
+        else:
+            assert False, "Unsupported init model type: " + str(type(tree_model.init_))
+        empty_prediction /= len(tree_model.estimators_)
+        return [
+            # GradientBoostedClassifier contains DecisionTreeRegressor as base_estimators
+            convert_tree_estimator(
+                tree, scaling=learning_rate, class_label=None, empty_prediction=empty_prediction
+            ) for tree in tree_model.estimators_[:, 0]
+        ]
+
+    if safe_isinstance(tree_model, "sklearn.ensemble.GradientBoostingRegressor"):
         learning_rate = tree_model.learning_rate
         if empty_prediction is None:
             if safe_isinstance(tree_model.init_, ["sklearn.ensemble.MeanEstimator", "sklearn.ensemble.gradient_boosting.MeanEstimator"]):
@@ -153,6 +171,7 @@ def convert_tree_estimator(
             convert_tree_estimator(tree, scaling=learning_rate, class_label=None, empty_prediction=empty_prediction)
             for tree in tree_model.estimators_[:, 0]
         ]
+
     if safe_isinstance(tree_model, "sklearn.ensemble.RandomForestRegressor") or \
             safe_isinstance(tree_model, "sklearn.ensemble.RandomForestClassifier"):
         scaling = 1.0 / len(tree_model.estimators_)
