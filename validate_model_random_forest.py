@@ -5,8 +5,8 @@ from sklearn.datasets import make_regression
 from sklearn.ensemble import RandomForestRegressor
 import numpy as np
 
-from linear_interaction.conversion import convert_tree_estimator
-from linear_interaction.tree_shap_iq import TreeShapIQ
+from tree_shap_iq.conversion import convert_tree_estimator
+from tree_shap_iq.base import TreeShapIQ
 
 if __name__ == "__main__":
     DO_TREE_SHAP = True

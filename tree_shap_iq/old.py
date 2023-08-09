@@ -6,7 +6,7 @@ from numpy.polynomial import Polynomial
 from numpy.polynomial.polynomial import polydiv
 from scipy.special import binom
 
-from linear_interaction.conversion import TreeModel
+from tree_shap_iq.conversion import TreeModel
 
 try:
     from .utils import _get_parent_array, powerset

@@ -1,4 +1,4 @@
 .idea
 tests/test_tree_shap.py
-linear_interaction/tree_shap_original.py
+tree_shap_iq/tree_shap_original.py
 data

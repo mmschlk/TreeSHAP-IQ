@@ -1,35 +1,15 @@
 """This module contains the TreeSHAP-IQ class."""
 from typing import Union
-from dataclasses import dataclass
 
 import numpy as np
 from scipy.special import binom
 
-from linear_interaction.conversion import TreeModel
+from tree_shap_iq.conversion import TreeModel, EdgeTree
 
 try:
     from .utils import _get_parent_array, powerset
 except ImportError:
     from utils import _get_parent_array, powerset
-
-
-@dataclass
-class EdgeTree:
-    """A dataclass for storing the information of a parsed tree."""
-    parents: np.ndarray[int]
-    ancestors: np.ndarray[int]
-    ancestor_nodes:  dict[int, np.ndarray[int]]
-    p_e_values: np.ndarray[float]
-    p_e_storages: np.ndarray[float]
-    split_weights: np.ndarray[float]
-    empty_predictions: np.ndarray[float]
-    edge_heights: np.ndarray[int]
-    max_depth: int
-    last_feature_node_in_path: np.ndarray[int]
-    interaction_height_store: dict[int, np.ndarray[int]]
-
-    def __getitem__(self, item):
-        return getattr(self, item)
 
 
 class TreeShapIQ:
@@ -50,8 +30,8 @@ class TreeShapIQ:
             background dataset to be provided.
 
         Args:
-            tree_model (dict): The tree model to be explained. The tree model must be a dictionary
-                with the following keys:
+            tree_model (Union[dict, TreeModel]): The tree model to be explained. If the tree model
+                is a dictionary it must include the following keys:
                     - children_left: np.ndarray[int] - The left children of each node.
                         Leaf nodes are denoted with -1.
                     - children_right: np.ndarray[int] - The right children of each node.

@@ -7,9 +7,9 @@ from sklearn.tree import DecisionTreeRegressor, plot_tree
 import matplotlib.pyplot as plt
 import numpy as np
 
-from linear_interaction.conversion import convert_tree_estimator
-from linear_interaction.old import TreeShapIQ
-from linear_interaction.tree_shap_iq import TreeShapIQ as TreeShapIQNew
+from tree_shap_iq.conversion import convert_tree_estimator
+from tree_shap_iq.old import TreeShapIQ
+from tree_shap_iq.base import TreeShapIQ as TreeShapIQNew
 
 if __name__ == "__main__":
     DO_TREE_SHAP = True
