@@ -140,7 +140,7 @@ def transform_interactions_in_n_shapley(
 
 
 def plot_n_sii(
-        feature_names: np.ndarray,
+        feature_names: Union[list, np.ndarray],
         n_shapley_values_pos: dict,
         n_shapley_values_neg: dict,
         n_sii_order: int
@@ -212,7 +212,10 @@ def plot_n_sii(
     axis.set_xticklabels(x_ticks_labels, rotation=45, ha='right')
 
     axis.set_xlim(-0.5, n_features - 0.5)
-    axis.set_ylim(min_max_values[0] * 1.05, min_max_values[1] * 1.3)
+    axis.set_ylim(
+        min_max_values[0] - abs(min_max_values[1] - min_max_values[0]) * 0.02,
+        min_max_values[1] + abs(min_max_values[1] - min_max_values[0]) * 0.3
+    )
 
     axis.set_ylabel("n-SII values")
     axis.set_xlabel("features")
