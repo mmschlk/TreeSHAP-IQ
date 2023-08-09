@@ -1,9 +1,15 @@
 import time
+from copy import deepcopy
 
 from scipy.special import binom
+from sklearn.datasets import make_regression
+from sklearn.tree import DecisionTreeRegressor, plot_tree
+import matplotlib.pyplot as plt
+import numpy as np
 
 from linear_interaction.conversion import convert_tree_estimator
 from linear_interaction.old import TreeShapIQ
+from linear_interaction.tree_shap_iq import TreeShapIQ as TreeShapIQNew
 
 if __name__ == "__main__":
     DO_TREE_SHAP = True
@@ -11,7 +17,7 @@ if __name__ == "__main__":
     DO_OBSERVATIONAL = True
     DO_GROUND_TRUTH = True
 
-    INTERACTION_ORDER = 3
+    INTERACTION_ORDER = 4
 
     if DO_TREE_SHAP:
         try:
@@ -19,12 +25,6 @@ if __name__ == "__main__":
         except ImportError:
             print("TreeSHAP not available. Please install shap package.")
             DO_TREE_SHAPE = False
-
-    from sklearn.datasets import make_regression
-    from sklearn.tree import DecisionTreeRegressor, plot_tree
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from copy import deepcopy
 
     # fix random seed for reproducibility
     random_seed = 10
@@ -53,12 +53,12 @@ if __name__ == "__main__":
     # LinearTreeSHAP -------------------------------------------------------------------------------
     # explain the tree with LinearTreeSHAP
 
-    explainer = TreeShapIQ(
+    explainer = TreeShapIQNew(
         tree_model=deepcopy(tree_model), n_features=x_input.shape[1], observational=True,
         max_interaction_order=INTERACTION_ORDER
     )
     start_time = time.time()
-    sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER)
+    sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER)[INTERACTION_ORDER]
     time_elapsed = time.time() - start_time
 
     print("Linear")
@@ -68,6 +68,11 @@ if __name__ == "__main__":
     print("Linear - time elapsed    ", time_elapsed)
     print("Linear - empty pred      ", explainer.empty_prediction)
     print()
+
+    explainer = TreeShapIQ(
+        tree_model=deepcopy(tree_model), n_features=x_input.shape[1], observational=True,
+        max_interaction_order=INTERACTION_ORDER
+    )
 
     if not DO_OBSERVATIONAL:
         start_time = time.time()
