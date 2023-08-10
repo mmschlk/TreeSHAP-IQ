@@ -1,15 +1,10 @@
 import time
-from copy import deepcopy
 
 from scipy.special import binom
-from sklearn.datasets import make_regression
-from sklearn.tree import DecisionTreeRegressor, plot_tree
-import matplotlib.pyplot as plt
-import numpy as np
 
 from tree_shap_iq.conversion import convert_tree_estimator
-from tree_shap_iq.old import TreeShapIQ
-from tree_shap_iq.base import TreeShapIQ as TreeShapIQNew
+from tree_shap_iq.base import TreeShapIQ
+from tree_shap_iq.old import TreeShapIQ as TreeSHAPIQ_gt
 
 if __name__ == "__main__":
     DO_TREE_SHAP = True
@@ -17,7 +12,8 @@ if __name__ == "__main__":
     DO_OBSERVATIONAL = True
     DO_GROUND_TRUTH = True
 
-    INTERACTION_ORDER = 4
+    INTERACTION_ORDER = 2
+    INTERACTION_TYPE = "SII"
 
     if DO_TREE_SHAP:
         try:
@@ -25,6 +21,12 @@ if __name__ == "__main__":
         except ImportError:
             print("TreeSHAP not available. Please install shap package.")
             DO_TREE_SHAPE = False
+
+    from sklearn.datasets import make_regression
+    from sklearn.tree import DecisionTreeRegressor, plot_tree
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from copy import deepcopy
 
     # fix random seed for reproducibility
     random_seed = 10
@@ -53,26 +55,22 @@ if __name__ == "__main__":
     # LinearTreeSHAP -------------------------------------------------------------------------------
     # explain the tree with LinearTreeSHAP
 
-    explainer = TreeShapIQNew(
+    explainer = TreeShapIQ(
         tree_model=deepcopy(tree_model), n_features=x_input.shape[1], observational=True,
-        max_interaction_order=INTERACTION_ORDER
+        max_interaction_order=INTERACTION_ORDER, interaction_type=INTERACTION_TYPE
+
     )
     start_time = time.time()
-    sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER, min_order=INTERACTION_ORDER)[INTERACTION_ORDER]
+    sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER)
     time_elapsed = time.time() - start_time
 
     print("Linear")
     print("Linear - time elapsed    ", time_elapsed)
     print("Linear - SVs (obs.)      ", sv_linear_tree_shap)
-    print("Linear - sum SVs (obs.)  ", sv_linear_tree_shap.sum() + explainer.empty_prediction)
+    print("Linear - sum SVs (obs.)  ", sv_linear_tree_shap[2].sum() + explainer.empty_prediction)
     print("Linear - time elapsed    ", time_elapsed)
     print("Linear - empty pred      ", explainer.empty_prediction)
     print()
-
-    explainer = TreeShapIQ(
-        tree_model=deepcopy(tree_model), n_features=x_input.shape[1], observational=True,
-        max_interaction_order=INTERACTION_ORDER
-    )
 
     if not DO_OBSERVATIONAL:
         start_time = time.time()
@@ -81,7 +79,8 @@ if __name__ == "__main__":
             n_features=x_input.shape[1],
             observational=False,
             background_dataset=X,
-            max_interaction_order=INTERACTION_ORDER
+            max_interaction_order=INTERACTION_ORDER,
+            interaction_type=INTERACTION_TYPE
         )
         sv_linear_tree_shap = explainer.explain(x_input[0], INTERACTION_ORDER)
         time_elapsed = time.time() - start_time
@@ -97,9 +96,12 @@ if __name__ == "__main__":
     # Ground Truth Brute Force ---------------------------------------------------------------------
     # compute the ground truth interactions with brute force
     if DO_GROUND_TRUTH:
-
+        explainer_gt = TreeSHAPIQ_gt(
+        tree_model=deepcopy(tree_model), n_features=x_input.shape[1], observational=True,
+        max_interaction_order=INTERACTION_ORDER, interaction_type=INTERACTION_TYPE
+        )
         start_time = time.time()
-        gt_results = explainer.explain_brute_force(x_input[0], INTERACTION_ORDER)
+        gt_results = explainer_gt.explain_brute_force(x_input[0], INTERACTION_ORDER)
         ground_truth_shap_int, ground_truth_shap_int_pos = gt_results
         time_elapsed = time.time() - start_time
 
