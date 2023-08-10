@@ -191,7 +191,7 @@ def plot_n_sii(
             bottom=reference_neg,
             color=COLORS_N_SII[order]
         )
-        axis.axhline(y=0, color="#CCCCCC", linestyle="solid", linewidth=0.5)
+        axis.axhline(y=0, color="black", linestyle="solid", linewidth=0.5)
         reference_pos += values_pos.loc[order]
         try:
             reference_neg += values_neg.loc[order + 1]

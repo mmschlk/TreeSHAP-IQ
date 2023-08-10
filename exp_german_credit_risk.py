@@ -3,6 +3,8 @@ import time
 
 import numpy as np
 import pandas as pd
+from scipy.special import logit
+from scipy.special import expit
 
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import GradientBoostingClassifier
@@ -19,10 +21,10 @@ if __name__ == "__main__":
 
     RANDOM_STATE = 42
 
-    MAX_INTERACTION_ORDER = 6
+    MAX_INTERACTION_ORDER = 1
     EXPLANATION_INDEX = 1
 
-    SAVE_FIGURES = True
+    SAVE_FIGURES = False
 
     # load the german credit risk dataset from disc ------------------------------------------------
     data = pd.read_csv("data/german_credit_risk.csv")
@@ -61,8 +63,10 @@ if __name__ == "__main__":
     )
     model.fit(X_train, y_train)
     print("Accuracy", model.score(X_test, y_test))
-    model_output = model.predict_log_proba(x_explain.reshape(1, -1))
-    print("Model output", model_output, "True label", y_true_label)
+    model_output_logit = model.predict_log_proba(x_explain.reshape(1, -1))
+    model_output_proba = model.predict_proba(x_explain.reshape(1, -1))
+    print("Model output proba:", model_output_proba,
+          "logit:", model_output_logit, "True label:", y_true_label)
 
     # convert the tree -----------------------------------------------------------------------------
 
@@ -91,7 +95,7 @@ if __name__ == "__main__":
     print("Time taken", explanation_time)
     print(sii_values_dict[1])
     print("Empty prediction", empty_prediction)
-    print("Sum", np.sum(sii_values_dict[1]) + empty_prediction)
+    print("Sum", expit(np.sum(sii_values_dict[1]) + empty_prediction))
 
     # transform the SII values in n-Shapley values
     n_shapley_values = transform_interactions_in_n_shapley(
@@ -190,7 +194,7 @@ if __name__ == "__main__":
     print("Time taken", explanation_time)
     print(sv_shap)
     print("Empty prediction", empty_prediction)
-    print("Sum", np.sum(sv_shap) + empty_prediction)
+    print("Sum", expit(np.sum(sv_shap) + empty_prediction))
 
     print("\nTreeShap explanations (interventional) ------------------")
     explanation_time, start_time = 0, time.time()
@@ -201,4 +205,4 @@ if __name__ == "__main__":
     print("Time taken", explanation_time)
     print(sv_shap)
     print("Empty prediction", empty_prediction)
-    print("Sum", np.sum(sv_shap) + empty_prediction)
+    print("Sum", expit(np.sum(sv_shap) + empty_prediction))
