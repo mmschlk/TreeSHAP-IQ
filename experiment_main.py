@@ -5,11 +5,9 @@ from typing import Union
 
 import numpy as np
 from matplotlib import pyplot as plt
-from shap.plots import force
+from shap.plots import force, waterfall
+from shap import Explanation
 
-from sklearn.model_selection import train_test_split
-from sklearn.datasets import fetch_california_housing
-from sklearn.ensemble import GradientBoostingRegressor
 from tqdm import tqdm
 from shap import TreeExplainer
 
@@ -76,6 +74,7 @@ def run_main_experiment(
 
     title: str = f"{dataset_name}: "
     save_name: str = f"plots/{dataset_name.lower().replace(' ', '_')}"
+    save_name += f"_instance_{explanation_id}_order_{max_interaction_order}"
 
     # create feature names
     feature_names_abbrev = [feature[:5] + "." for feature in feature_names]
@@ -147,19 +146,14 @@ def run_main_experiment(
         feature_names=feature_names_abbrev,
         n_sii_order=max_interaction_order
     )
-
     axis_obs.set_title(title + f"n-SII for instance {explanation_id}")
-
     if save_figures:
-        save_name_n_sii = save_name + "_n_sii.pdf"
-        fig_obs.savefig(save_name_n_sii, bbox_inches="tight")
-
+        fig_obs.savefig(save_name + "_n_sii.pdf", bbox_inches="tight")
     fig_obs.show()
 
     # plot the network plot ------------------------------------------------------------------------
 
     if max_interaction_order == 2:
-
         # plot the n-Shapley values
         fig_network, axis_network = draw_interaction_network(
             first_order_values=n_sii_values[1],
@@ -167,21 +161,20 @@ def run_main_experiment(
             feature_names=feature_names_values,
             n_features=n_features,
         )
-
         title_network: str = title + f"n-SII network plot for instance {explanation_id}\n" \
                                      f"Model output: {model_output}, True label: {y_true_label}"
         axis_network.set_title(title_network)
-
         if save_figures:
-            save_name_network = save_name + "_network.pdf"
-            fig_network.savefig(save_name_network, bbox_inches="tight")
-
+            fig_network.savefig(save_name + "_network.pdf", bbox_inches="tight")
         fig_network.show()
 
     # plot the force plots -------------------------------------------------------------------------
+
+    # SV force plot
     force(explainer_shap.expected_value, sv_shap, feature_names=feature_names_abbrev,
           matplotlib=True, show=False, figsize=(20, 3))
-    plt.savefig(save_name + "_force_SV.pdf", bbox_inches="tight")
+    if save_figures:
+        plt.savefig(save_name + "_force_SV.pdf", bbox_inches="tight")
     plt.show()
 
     # plot the n-SII values as force plot
@@ -190,23 +183,58 @@ def run_main_experiment(
 
     interaction_feature_names = []
     interaction_values = []
+    interaction_feature_values = []
     for order in range(2, max_interaction_order + 1):
         for interaction in powerset(set(range(n_features)), min_size=order, max_size=order):
             comb_name: str = ""
+            interaction_feature_value = ""
             for feature in interaction:
                 if comb_name != "":
                     comb_name += " x "
+                    interaction_feature_value += " x "
                 comb_name += single_feature_names[feature]
+                interaction_feature_value += f"{round(x_explain[feature], 2)}"
             interaction_values.append(n_sii_values[order][interaction])
             interaction_feature_names.append(comb_name)
+            interaction_feature_values.append(interaction_feature_value)
     interaction_values = np.asarray(interaction_values)
+    interaction_feature_values = np.asarray(interaction_feature_values)
 
     # combine
-    all_features = single_feature_names + interaction_feature_names
+    all_feature_names = single_feature_names + interaction_feature_names
     all_n_sii_values = np.concatenate([n_sii_values_sv, interaction_values])
+    all_interaction_feature_values = np.concatenate([
+        np.round(x_explain, 2), interaction_feature_values])
 
     # plot the TreeShap values
-    force(explainer_shap.expected_value, all_n_sii_values, feature_names=all_features,
+    force(explainer_shap.expected_value, all_n_sii_values, feature_names=all_feature_names,
           matplotlib=True, show=False, figsize=(20, 3))
-    plt.savefig(save_name + "_force_n_SII.pdf", bbox_inches="tight")
+    if save_figures:
+        plt.savefig(save_name + "_force_n_SII.pdf", bbox_inches="tight")
+    plt.show()
+
+    # plot the waterfall plot ----------------------------------------------------------------------
+
+    # SV waterfall plot
+    shap_explanation = Explanation(
+        values=sv_shap,
+        base_values=explainer_shap.expected_value[0],
+        data=x_explain,
+        feature_names=feature_names_abbrev
+    )
+    waterfall(shap_explanation, show=False)
+    if save_figures:
+        plt.savefig(save_name + "_waterfall_SV.pdf", bbox_inches="tight")
+    plt.show()
+
+    # plot the n-SII values as waterfall plot
+    n_sii_explanation = Explanation(
+        values=all_n_sii_values,
+        base_values=explainer_shap.expected_value[0],
+        data=all_interaction_feature_values,
+        feature_names=all_feature_names
+    )
+    waterfall(n_sii_explanation, show=False)
+    if save_figures:
+        plt.savefig(save_name + "_waterfall_n_sii.pdf", bbox_inches="tight")
     plt.show()
