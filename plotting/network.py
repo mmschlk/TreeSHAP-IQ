@@ -42,13 +42,17 @@ def _add_weight_to_edges_in_graph(
 
     all_range = abs(max(max_node_value, max_edge_value) - min(min_node_value, min_edge_value))
 
+    size_scaler = 30
+
     for node in graph.nodes:
         weight: float = first_order_values[node]
         size = abs(weight) / all_range
         color = _get_color(weight)
         graph.nodes[node]['node_color'] = color
-        graph.nodes[node]['node_size'] = size * 1000
+        graph.nodes[node]['node_size'] = 1
         graph.nodes[node]['label'] = feature_names[node]
+        graph.nodes[node]['linewidths'] = size * size_scaler
+        graph.nodes[node]['edgecolors'] = color
 
     for edge in powerset(range(n_features), min_size=2, max_size=2):
         weight: float = second_order_values[edge]
@@ -56,7 +60,7 @@ def _add_weight_to_edges_in_graph(
         # scale weight between min and max edge value
         size = abs(weight) / all_range
         graph_edge = graph.get_edge_data(*edge)
-        graph_edge['width'] = size * 10
+        graph_edge['width'] = size * (size_scaler + 1)
         graph_edge['color'] = color
 
 
@@ -93,6 +97,8 @@ def draw_interaction_network(
     node_colors = nx.get_node_attributes(graph, 'node_color').values()
     node_sizes = list(nx.get_node_attributes(graph, 'node_size').values())
     node_labels = nx.get_node_attributes(graph, 'label')
+    node_line_widths = list(nx.get_node_attributes(graph, 'linewidths').values())
+    node_edge_colors = list(nx.get_node_attributes(graph, 'edgecolors').values())
 
     edge_colors = nx.get_edge_attributes(graph, 'color').values()
     edge_widths = list(nx.get_edge_attributes(graph, 'width').values())
@@ -103,22 +109,21 @@ def draw_interaction_network(
 
     pos = nx.circular_layout(graph)
     nx.draw_networkx_edges(graph, pos, width=edge_widths, edge_color=edge_colors, alpha=edge_alphas)
-    nx.draw_networkx_nodes(graph, pos, node_color=node_colors, node_size=node_sizes)
-    #nx.draw_networkx_labels(graph, pos, labels=node_labels, font_size=10)
+    nx.draw_networkx_nodes(graph, pos, node_color=node_colors, node_size=node_sizes, linewidths=node_line_widths, edgecolors=node_edge_colors)
 
-    # I want the labels of the node in node_labels to be ordered around in a circle around the graph
     for node, (x, y) in pos.items():
-        radius = 1.18
-        theta = np.arctan2(y, x)
+        size = graph.nodes[node]['linewidths']
+        label = node_labels[node]
+        radius = 1.15 + size / 300
+        theta = np.arctan2(x, y)
+        if abs(theta) <= 0.001:
+            label = "\n" + label
         theta = np.pi / 2 - theta
         if theta < 0:
             theta += 2 * np.pi
         x = radius * np.cos(theta)
         y = radius * np.sin(theta)
-        axis.text(x, y, node_labels[node], horizontalalignment='center', verticalalignment='center')
 
-
-
-
+        axis.text(x, y, label, horizontalalignment='center', verticalalignment='center')
 
     return fig, axis

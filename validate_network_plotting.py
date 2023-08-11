@@ -58,16 +58,18 @@ if __name__ == "__main__":
     feature_names_values = [feature + f".\n(" + str(round(x_explain[i], 2)) + ")" for i, feature in enumerate(feature_names_abbrev)]
 
     # fit a tree model -----------------------------------------------------------------------------
-
     model = GradientBoostingClassifier(
-        # max_depth=3, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0,
+        #max_depth=3, learning_rate=0.1, min_samples_leaf=5, n_estimators=10, max_features=1.0,
         max_depth=5, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0,
         random_state=RANDOM_STATE
     )
     model.fit(X_train, y_train)
     print("R^2 on test data", model.score(X_test, y_test))
-    model_output = model.predict(x_explain.reshape(1, -1))
-    print("Model output", model_output, "True label", y_true_label)
+    model_output = model.predict(x_explain.reshape(1, -1))[0]
+    model_output_proba = model.predict_proba(x_explain.reshape(1, -1))[0]
+    model_output_logit = model.predict_log_proba(x_explain.reshape(1, -1))[0]
+    print("Model output", model_output, model_output_proba, model_output_logit,
+          "True label", y_true_label)
 
     # convert the tree -----------------------------------------------------------------------------
 
@@ -108,6 +110,11 @@ if __name__ == "__main__":
     print(np.round(n_sii_values[1], 2))
     print(np.round(n_sii_values[2], 2))
 
+    #order_1 = np.asarray([1., -1., 0.5])
+    #order_2 = np.asarray([1., 1., 0., -1., 0.5, -0.5, -0.5, 0.5, 0.5]).reshape((3, 3))
+    #feature_names = ["A", "B", "C"]
+    #n_features = 3
+
     # plot the n-Shapley values
     fig, axis = draw_interaction_network(
         first_order_values=n_sii_values[1],
@@ -117,7 +124,9 @@ if __name__ == "__main__":
     )
 
     # make plots content and show the plots --------------------------------------------------------
-    axis.set_title(f"German Credit: n-SII network plot for instance {explanation_id}")
+    title: str = f"German Credit: n-SII network plot for instance {explanation_id}\n" \
+                 f"Model output: {model_output}, True label: {y_true_label}"
+    axis.set_title(title)
 
     if SAVE_FIGURES:
         fig.savefig(f"plots/network_german_credit_risk_obs_{explanation_id}.pdf", bbox_inches="tight")
