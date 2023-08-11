@@ -142,11 +142,14 @@ def convert_tree_estimator(
             "sklearn.ensemble.gradient_boosting.LogOddsEstimator"
         ]):
             empty_prediction = deepcopy(tree_model.init_.prior[class_label])
+            # TODO not validated
         elif safe_isinstance(tree_model.init_, "sklearn.dummy.DummyClassifier"):
-            empty_prediction = logit(tree_model.init_.class_prior_[class_label])
+            #empty_prediction = logit(tree_model.init_.class_prior_[class_label])
+            empty_prediction = logit(tree_model.init_.class_prior_[1])
         else:
             assert False, "Unsupported init model type: " + str(type(tree_model.init_))
         empty_prediction /= len(tree_model.estimators_)
+        #empty_prediction = logit(empty_prediction)
         return [
             # GradientBoostedClassifier contains DecisionTreeRegressor as base_estimators
             convert_tree_estimator(
@@ -167,7 +170,6 @@ def convert_tree_estimator(
                 assert False, "Unsupported init model type: " + str(type(tree_model.init_))
             empty_prediction /= len(tree_model.estimators_)  # we distribute the empty prediction to all trees equally
         return [
-            # GradientBoostedClassifier contains DecisionTreeRegressor as base_estimators
             convert_tree_estimator(tree, scaling=learning_rate, class_label=None, empty_prediction=empty_prediction)
             for tree in tree_model.estimators_[:, 0]
         ]
