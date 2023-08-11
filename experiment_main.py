@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from shap.plots import force, waterfall
 from shap import Explanation
-
+from scipy.special import logit, expit
 from tqdm import tqdm
 from shap import TreeExplainer
 
@@ -25,6 +25,7 @@ def run_shap_iq(
         n_features: int,
         background_dataset: np.ndarray,
         observational: bool = True,
+        classification: bool = False,
 ):
     # explain with TreeShapIQ observational --------------------------------------------------------
     print("\nTreeShapIQ explanations (observational) ------------------")
@@ -51,9 +52,12 @@ def run_shap_iq(
         }
         empty_prediction += explainer.empty_prediction
     print("Time taken", explanation_time)
+    explanation_sum = np.sum(list(sii_values_dict[1])) + empty_prediction
+    if classification:  # TODO check if model is using odds or probas
+        explanation_sum = expit(explanation_sum)
     print(sii_values_dict[1])
     print("Empty prediction", empty_prediction)
-    print("Sum", np.sum(sii_values_dict[1]) + empty_prediction)
+    print("Sum", explanation_sum)
 
     return sii_values_dict, empty_prediction
 
@@ -70,6 +74,8 @@ def run_main_experiment(
         background_dataset: np.ndarray = None,
         observational: bool = True,
         save_figures: bool = False,
+        classification: bool = False,
+        show_plots: bool = True
 ) -> None:
 
     title: str = f"{dataset_name}: "
@@ -85,8 +91,11 @@ def run_main_experiment(
 
     try:
         model_output = model.predict(x_explain.reshape(1, -1))[0]
-        model_output_logit = model.predict_log_proba(x_explain.reshape(1, -1))[0]
         model_output_proba = model.predict_proba(x_explain.reshape(1, -1))[0]
+        try:
+            model_output_logit = model.predict_log_proba(x_explain.reshape(1, -1))[0]
+        except AttributeError:
+            model_output_logit = logit(model_output_proba)
         print("Model output proba:", model_output_proba,
               "logit:", model_output_logit, "True label:", y_true_label)
     except AttributeError:  # if model is a regressor
@@ -107,6 +116,7 @@ def run_main_experiment(
         n_features=n_features,
         background_dataset=background_dataset,
         observational=observational,
+        classification=classification
     )
 
     # generate n-SII values ------------------------------------------------------------------------
@@ -132,11 +142,21 @@ def run_main_experiment(
     else:
         explainer_shap = TreeExplainer(
             model, feature_perturbation="interventional", data=background_dataset[:50])
-    sv_shap = explainer_shap.shap_values(x_explain).copy()
-    empty_prediction = explainer_shap.expected_value
+    # reshape x_explain in 2 dim matrix
+    x_explain_sv = copy(x_explain.reshape(1, -1))
+    sv_shap = explainer_shap.shap_values(x_explain_sv).copy()
+    try:
+        shap_empty_pred = explainer_shap.expected_value[0]
+    except IndexError:
+        shap_empty_pred = explainer_shap.expected_value
+    if len(sv_shap) == 1:
+        sv_shap = sv_shap[0]
+    explanation_sum: float = np.sum(sv_shap) + empty_prediction
+    if classification:
+        explanation_sum = expit(explanation_sum)
     print(sv_shap)
     print("Empty prediction", empty_prediction)
-    print("Sum", np.sum(sv_shap) + empty_prediction)
+    print("Sum", explanation_sum)
 
     # plot the n-SII values ------------------------------------------------------------------------
 
@@ -149,7 +169,7 @@ def run_main_experiment(
     axis_obs.set_title(title + f"n-SII for instance {explanation_id}")
     if save_figures:
         fig_obs.savefig(save_name + "_n_sii.pdf", bbox_inches="tight")
-    fig_obs.show()
+    fig_obs.show() if show_plots else plt.close("all")
 
     # plot the network plot ------------------------------------------------------------------------
 
@@ -166,7 +186,7 @@ def run_main_experiment(
         axis_network.set_title(title_network)
         if save_figures:
             fig_network.savefig(save_name + "_network.pdf", bbox_inches="tight")
-        fig_network.show()
+        fig_network.show() if show_plots else plt.close("all")
 
     # plot the force plots -------------------------------------------------------------------------
 
@@ -175,7 +195,7 @@ def run_main_experiment(
           matplotlib=True, show=False, figsize=(20, 3))
     if save_figures:
         plt.savefig(save_name + "_force_SV.pdf", bbox_inches="tight")
-    plt.show()
+    plt.show() if show_plots else plt.close("all")
 
     # plot the n-SII values as force plot
     n_sii_values_sv: np.ndarray = n_sii_values[1].copy()
@@ -211,30 +231,31 @@ def run_main_experiment(
           matplotlib=True, show=False, figsize=(20, 3))
     if save_figures:
         plt.savefig(save_name + "_force_n_SII.pdf", bbox_inches="tight")
-    plt.show()
+    plt.show() if show_plots else plt.close("all")
 
     # plot the waterfall plot ----------------------------------------------------------------------
+
 
     # SV waterfall plot
     shap_explanation = Explanation(
         values=sv_shap,
-        base_values=explainer_shap.expected_value[0],
+        base_values=shap_empty_pred,
         data=x_explain,
         feature_names=feature_names_abbrev
     )
     waterfall(shap_explanation, show=False)
     if save_figures:
         plt.savefig(save_name + "_waterfall_SV.pdf", bbox_inches="tight")
-    plt.show()
+    plt.show() if show_plots else plt.close("all")
 
     # plot the n-SII values as waterfall plot
     n_sii_explanation = Explanation(
         values=all_n_sii_values,
-        base_values=explainer_shap.expected_value[0],
+        base_values=shap_empty_pred,
         data=all_interaction_feature_values,
         feature_names=all_feature_names
     )
     waterfall(n_sii_explanation, show=False)
     if save_figures:
         plt.savefig(save_name + "_waterfall_n_sii.pdf", bbox_inches="tight")
-    plt.show()
+    plt.show() if show_plots else plt.close("all")

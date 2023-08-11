@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import GradientBoostingClassifier
+import xgboost as xgb
 from sklearn.preprocessing import OrdinalEncoder
 
 from experiment_main import run_main_experiment
@@ -15,7 +15,7 @@ if __name__ == "__main__":
     classification: bool = True
     random_state: int = 42
 
-    max_interaction_order: int = 1
+    max_interaction_order: int = 2
     explanation_index: int = 1
 
     save_figures: bool = False
@@ -55,13 +55,15 @@ if __name__ == "__main__":
 
     # fit a tree model -----------------------------------------------------------------------------
 
-    model = GradientBoostingClassifier(
-        #max_depth=3, learning_rate=0.1, min_samples_leaf=5, n_estimators=2, max_features=1.0,
-        max_depth=5, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0,
-        random_state=random_state
-    )
+    # get a xgboost model
+    model: xgb.XGBClassifier = xgb.XGBClassifier()
+
+    # fit the model
     model.fit(X_train, y_train)
-    print("Accuracy", model.score(X_test, y_test))
+
+    # print the accuracy
+    print("Accuracy on test data", model.score(X_test, y_test))
+    model.predict_proba(x_explain.reshape(1, -1))
 
     # run the experiment --------------------------------------------------------------------------
 
