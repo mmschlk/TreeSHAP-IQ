@@ -1,6 +1,7 @@
 """This module contains functions to plot the n_sii values for a given instance."""
 __all__ = ["plot_n_sii", "transform_interactions_in_n_shapley"]
 
+import copy
 from copy import deepcopy
 from typing import Union
 
@@ -85,9 +86,8 @@ def _transform_shape_of_interaction_values(
 def transform_interactions_in_n_shapley(
         n_features: int,
         n: int,
-        interaction_values: dict[int, np.ndarray],
-        reduce_one_dimension: bool = False
-) -> Union[dict[int, np.ndarray], tuple[dict[int, np.ndarray], dict[int, np.ndarray]]]:
+        interaction_values: dict[int, np.ndarray]
+):
     """Computes the n-Shapley values from the interaction values
 
     Args:
@@ -95,8 +95,6 @@ def transform_interactions_in_n_shapley(
         interaction_values (Dict[int, np.ndarray], optional): The interaction values.
             Defaults to None.
         n int: The order of the interaction values.
-        reduce_one_dimension (bool, optional): If True, the n-Shapley values are reduced to one
-            dimension. Defaults to False.
 
     Returns:
         dict: A dictionary containing the n-Shapley values
@@ -134,9 +132,8 @@ def transform_interactions_in_n_shapley(
             # normalization with bernoulli numbers
             S_effect += bernoulli_numbers[len(T) - subset_size] * T_effect
         result[len(S)][tuple(S)] = S_effect
-    if not reduce_one_dimension:
-        return result
-    return _convert_n_shapley_values_to_one_dimension(result, n=n, n_features=n_features)
+    return result, _convert_n_shapley_values_to_one_dimension(
+        copy.deepcopy(result), n=n, n_features=n_features)
 
 
 def plot_n_sii(
