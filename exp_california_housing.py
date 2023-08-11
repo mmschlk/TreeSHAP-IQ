@@ -19,7 +19,7 @@ if __name__ == "__main__":
 
     RANDOM_STATE = 42
 
-    MAX_INTERACTION_ORDER = 2
+    MAX_INTERACTION_ORDER = 3
     EXPLANATION_INDEX = 2
 
     SAVE_FIGURES = True
@@ -90,14 +90,22 @@ if __name__ == "__main__":
     print("Empty prediction", empty_prediction)
     print("Sum", np.sum(sii_values_dict[1]) + empty_prediction)
 
-    # transform the SII values in n-Shapley values
-    n_shapley_values = transform_interactions_in_n_shapley(
+    # compute n-SII
+    n_sii_values = transform_interactions_in_n_shapley(
+        interaction_values=sii_values_dict,
+        n=MAX_INTERACTION_ORDER,
+        n_features=n_features,
+        reduce_one_dimension=False
+    )
+
+    # transform the SII values in n-Shapley values for plotting
+    n_sii_one_dim = transform_interactions_in_n_shapley(
         interaction_values=sii_values_dict,
         n=MAX_INTERACTION_ORDER,
         n_features=n_features,
         reduce_one_dimension=True
     )
-    n_shapley_values_pos, n_shapley_values_neg = n_shapley_values
+    n_shapley_values_pos, n_shapley_values_neg = n_sii_one_dim
 
     sum_value: float = empty_prediction
     for order in range(1, MAX_INTERACTION_ORDER + 1):
@@ -125,13 +133,6 @@ if __name__ == "__main__":
 
     # explain with TreeShapIQ interventional -------------------------------------------------------
     if MAX_INTERACTION_ORDER == 2:
-
-        n_sii_values = transform_interactions_in_n_shapley(
-            interaction_values=sii_values_dict,
-            n=MAX_INTERACTION_ORDER,
-            n_features=n_features,
-            reduce_one_dimension=False
-        )
 
         # plot the n-Shapley values
         fig_network, axis_network = draw_interaction_network(
