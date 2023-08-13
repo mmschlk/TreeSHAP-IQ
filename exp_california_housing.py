@@ -13,8 +13,10 @@ if __name__ == "__main__":
     RANDOM_STATE = 42
     MAX_INTERACTION_ORDER = 3
     EXPLANATION_INDEX = 2
-    SAVE_FIGURES = True
+    SAVE_FIGURES = False
     dataset_name: str = "California"
+
+    force_limits = (0.4, 6.8)
 
     # load the california housing dataset and pre-process ------------------------------------------
     data = fetch_california_housing(as_frame=True)
@@ -62,4 +64,5 @@ if __name__ == "__main__":
         background_dataset=X,
         observational=True,
         save_figures=SAVE_FIGURES,
+        force_limits=force_limits
     )

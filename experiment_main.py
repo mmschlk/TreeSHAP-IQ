@@ -75,7 +75,8 @@ def run_main_experiment(
         observational: bool = True,
         save_figures: bool = False,
         classification: bool = False,
-        show_plots: bool = True
+        show_plots: bool = True,
+        force_limits: tuple[float, float] = None
 ) -> None:
 
     title: str = f"{dataset_name}: "
@@ -193,6 +194,8 @@ def run_main_experiment(
     # SV force plot
     force(explainer_shap.expected_value, sv_shap, feature_names=feature_names_abbrev,
           matplotlib=True, show=False, figsize=(20, 3))
+    if force_limits is not None:
+        plt.xlim(force_limits)
     if save_figures:
         plt.savefig(save_name + "_force_SV.pdf", bbox_inches="tight")
     plt.show() if show_plots else plt.close("all")
@@ -227,8 +230,11 @@ def run_main_experiment(
         np.round(x_explain, 2), interaction_feature_values])
 
     # plot the TreeShap values
+
     force(explainer_shap.expected_value, all_n_sii_values, feature_names=all_feature_names,
           matplotlib=True, show=False, figsize=(20, 3))
+    if force_limits is not None:
+        plt.xlim(force_limits)
     if save_figures:
         plt.savefig(save_name + "_force_n_SII.pdf", bbox_inches="tight")
     plt.show() if show_plots else plt.close("all")
