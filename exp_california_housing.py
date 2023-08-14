@@ -15,12 +15,12 @@ if __name__ == "__main__":
     # MAX_INTERACTION_ORDER = 2,3
     # EXPLANATION_INDEX = 2
     # force_limits = (0.4, 6.8)
-    # model = (max_depth=10, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0)
+    # model = GradientBoostingRegressor(max_depth=10, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0)
 
     RANDOM_STATE = 42
     MAX_INTERACTION_ORDER = 3
     EXPLANATION_INDEX = 2
-    SAVE_FIGURES = False
+    SAVE_FIGURES = True
     dataset_name: str = "California"
 
     force_limits = (0.4, 6.8)

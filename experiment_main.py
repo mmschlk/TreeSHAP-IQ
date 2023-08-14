@@ -76,7 +76,9 @@ def run_main_experiment(
         save_figures: bool = False,
         classification: bool = False,
         show_plots: bool = True,
-        force_limits: tuple[float, float] = None
+        force_limits: tuple[float, float] = None,
+        sv_dim: int = None,
+        output_type: str = "raw",
 ) -> None:
 
     title: str = f"{dataset_name}: "
@@ -105,8 +107,8 @@ def run_main_experiment(
         print("Model output", model_output, "True label", y_true_label)
 
     # convert the tree -----------------------------------------------------------------------------
-
-    tree_model = convert_tree_estimator(model)
+    class_label = None if not classification else 1
+    tree_model = convert_tree_estimator(model, class_label=class_label, output_type=output_type)
 
     # explain with TreeShapIQ observational --------------------------------------------------------
 
@@ -146,6 +148,8 @@ def run_main_experiment(
     # reshape x_explain in 2 dim matrix
     x_explain_sv = copy(x_explain.reshape(1, -1))
     sv_shap = explainer_shap.shap_values(x_explain_sv).copy()
+    if sv_dim is not None:
+        sv_shap = sv_shap[sv_dim]
     try:
         shap_empty_pred = explainer_shap.expected_value[0]
     except IndexError:
@@ -192,7 +196,7 @@ def run_main_experiment(
     # plot the force plots -------------------------------------------------------------------------
 
     # SV force plot
-    force(explainer_shap.expected_value, sv_shap, feature_names=feature_names_abbrev,
+    force(shap_empty_pred, sv_shap, feature_names=feature_names_values,
           matplotlib=True, show=False, figsize=(20, 3))
     if force_limits is not None:
         plt.xlim(force_limits)
@@ -207,6 +211,7 @@ def run_main_experiment(
     interaction_feature_names = []
     interaction_values = []
     interaction_feature_values = []
+    interaction_feature_names_with_values = []
     for order in range(2, max_interaction_order + 1):
         for interaction in powerset(set(range(n_features)), min_size=order, max_size=order):
             comb_name: str = ""
@@ -220,6 +225,7 @@ def run_main_experiment(
             interaction_values.append(n_sii_values[order][interaction])
             interaction_feature_names.append(comb_name)
             interaction_feature_values.append(interaction_feature_value)
+            interaction_feature_names_with_values.append(comb_name + f"\n({interaction_feature_value})")
     interaction_values = np.asarray(interaction_values)
     interaction_feature_values = np.asarray(interaction_feature_values)
 
@@ -228,10 +234,11 @@ def run_main_experiment(
     all_n_sii_values = np.concatenate([n_sii_values_sv, interaction_values])
     all_interaction_feature_values = np.concatenate([
         np.round(x_explain, 2), interaction_feature_values])
+    all_feature_names_with_values = feature_names_values + interaction_feature_names_with_values
 
     # plot the TreeShap values
 
-    force(explainer_shap.expected_value, all_n_sii_values, feature_names=all_feature_names,
+    force(shap_empty_pred, all_n_sii_values, feature_names=all_feature_names_with_values,
           matplotlib=True, show=False, figsize=(20, 3))
     if force_limits is not None:
         plt.xlim(force_limits)

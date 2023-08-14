@@ -1,9 +1,9 @@
-"""This module is used to run the experiment on the german-credit-risk dataset."""
+"""This module is used to run the experiment on the breast cancer detection dataset."""
 import numpy as np
 import pandas as pd
 
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OrdinalEncoder
+from sklearn.datasets import load_breast_cancer
 from xgboost import XGBClassifier
 
 from experiment_main import run_main_experiment
@@ -11,23 +11,7 @@ from experiment_main import run_main_experiment
 
 if __name__ == "__main__":
 
-    # settings for the network plot image in the paper
-    # random_state = 42
-    # max_interaction_order = 2
-    # explanation_index = 1
-    # from sklearn.ensemble import GradientBoostingClassifier
-    # model = GradientBoostingClassifier(
-    #   max_depth=5, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0,
-    #   random_state=random_state
-    # )
-
-    # settings for the n-SII plot in the experiments section
-    # random_state = 42
-    # max_interaction_order = 7
-    # explanation_index = 1
-    # model = XGBClassifier()
-
-    dataset_name: str = "German Credit"
+    dataset_name: str = "Breast Cancer"
     classification: bool = True
     random_state: int = 42
 
@@ -36,23 +20,15 @@ if __name__ == "__main__":
 
     save_figures: bool = False
 
-    # load the german credit risk dataset from disc and pre-process --------------------------------
+    # load the breast cancer and pre-process -------------------------------------------------------
+    dataset = load_breast_cancer()
+    feature_names = list(dataset.feature_names)
+    X = pd.DataFrame(dataset.data, columns=feature_names)
+    y = pd.Series(dataset.target, name="target")
 
-    data = pd.read_csv("data/german_credit_risk.csv")
-    X = data.drop(columns=["GoodCredit"])
-    y = data["GoodCredit"]
     n_features = X.shape[-1]
     n_samples = len(X)
-
-    # data preprocessing
-    cat_columns = [
-        "checkingstatus", "history", "purpose", "savings", "employ", "status", "others", "property",
-        "otherplans", "housing", "job", "tele", "foreign"
-    ]
-    X[cat_columns] = OrdinalEncoder().fit_transform(X[cat_columns])
     X = X.astype(float)
-    y = y.replace({1: 1, 2: 0})
-    feature_names = list(X.columns)
 
     # train test split and get explanation datapoint -----------------------------------------------
 

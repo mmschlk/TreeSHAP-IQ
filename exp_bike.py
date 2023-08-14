@@ -1,57 +1,43 @@
-"""This module is used to run the experiment on the german-credit-risk dataset."""
+"""This module is used to run the experiment on the bike sharing dataset."""
+import random
+
 import numpy as np
 import pandas as pd
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OrdinalEncoder
-from xgboost import XGBClassifier
+from sklearn.datasets import fetch_openml
+
+from xgboost import XGBRegressor
 
 from experiment_main import run_main_experiment
 
 
 if __name__ == "__main__":
 
-    # settings for the network plot image in the paper
-    # random_state = 42
-    # max_interaction_order = 2
-    # explanation_index = 1
-    # from sklearn.ensemble import GradientBoostingClassifier
-    # model = GradientBoostingClassifier(
-    #   max_depth=5, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0,
-    #   random_state=random_state
-    # )
-
-    # settings for the n-SII plot in the experiments section
-    # random_state = 42
-    # max_interaction_order = 7
-    # explanation_index = 1
-    # model = XGBClassifier()
-
-    dataset_name: str = "German Credit"
-    classification: bool = True
+    dataset_name: str = "Bike"
+    classification: bool = False
     random_state: int = 42
 
-    max_interaction_order: int = 1
-    explanation_index: int = 1
+    max_interaction_order: int = 4
+    explanation_index: int = int(random.randint(0, 1000))
 
-    save_figures: bool = False
+    save_figures: bool = True
 
-    # load the german credit risk dataset from disc and pre-process --------------------------------
+    # load the bike sharing dataset from openml and pre-process ------------------------------------
 
-    data = pd.read_csv("data/german_credit_risk.csv")
-    X = data.drop(columns=["GoodCredit"])
-    y = data["GoodCredit"]
+    data, y = fetch_openml(data_id=42713, return_X_y=True, as_frame=True)
+    feature_names = list(data.columns)
+    num_feature_names = ['hour', 'temp', 'feel_temp', 'humidity', 'windspeed']
+    cat_feature_names = ['season', 'year', 'month', 'holiday', 'weekday', 'workingday', 'weather']
+    data[num_feature_names] = data[num_feature_names].apply(pd.to_numeric)
+    data[cat_feature_names] = OrdinalEncoder().fit_transform(data[cat_feature_names])
+    data = pd.DataFrame(data, columns=feature_names)
+    data.dropna(inplace=True)
+
+    X = data
     n_features = X.shape[-1]
     n_samples = len(X)
-
-    # data preprocessing
-    cat_columns = [
-        "checkingstatus", "history", "purpose", "savings", "employ", "status", "others", "property",
-        "otherplans", "housing", "job", "tele", "foreign"
-    ]
-    X[cat_columns] = OrdinalEncoder().fit_transform(X[cat_columns])
-    X = X.astype(float)
-    y = y.replace({1: 1, 2: 0})
     feature_names = list(X.columns)
 
     # train test split and get explanation datapoint -----------------------------------------------
@@ -73,9 +59,9 @@ if __name__ == "__main__":
 
     # fit a tree model -----------------------------------------------------------------------------
 
-    model: XGBClassifier = XGBClassifier()
+    model: XGBRegressor = XGBRegressor(random_state=random_state)
     model.fit(X_train, y_train)
-    print("Accuracy on test data", model.score(X_test, y_test))
+    print("R^2 Score on test Data", model.score(X_test, y_test))
 
     # run the experiment --------------------------------------------------------------------------
 

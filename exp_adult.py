@@ -1,9 +1,13 @@
-"""This module is used to run the experiment on the german-credit-risk dataset."""
+"""This module is used to run the experiment on the adult census dataset."""
 import numpy as np
 import pandas as pd
 
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OrdinalEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OrdinalEncoder, StandardScaler
+
 from xgboost import XGBClassifier
 
 from experiment_main import run_main_experiment
@@ -11,23 +15,7 @@ from experiment_main import run_main_experiment
 
 if __name__ == "__main__":
 
-    # settings for the network plot image in the paper
-    # random_state = 42
-    # max_interaction_order = 2
-    # explanation_index = 1
-    # from sklearn.ensemble import GradientBoostingClassifier
-    # model = GradientBoostingClassifier(
-    #   max_depth=5, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0,
-    #   random_state=random_state
-    # )
-
-    # settings for the n-SII plot in the experiments section
-    # random_state = 42
-    # max_interaction_order = 7
-    # explanation_index = 1
-    # model = XGBClassifier()
-
-    dataset_name: str = "German Credit"
+    dataset_name: str = "Adult Census"
     classification: bool = True
     random_state: int = 42
 
@@ -38,20 +26,40 @@ if __name__ == "__main__":
 
     # load the german credit risk dataset from disc and pre-process --------------------------------
 
-    data = pd.read_csv("data/german_credit_risk.csv")
-    X = data.drop(columns=["GoodCredit"])
-    y = data["GoodCredit"]
+    data = pd.read_csv("data/adult.csv")
+    data = data.dropna()
+    y = data["label"]
+    data = data.drop(columns=["label"])
+
+    num_feature_names = [
+        'age', 'capital-gain', 'capital-loss', 'hours-per-week', 'fnlwgt'
+    ]
+    cat_feature_names = [
+        'workclass', 'education', 'marital-status', 'occupation', 'relationship', 'race', 'sex',
+        'native-country', 'education-num'
+    ]
+    # TODO check for errors
+    data[num_feature_names] = data[num_feature_names].apply(pd.to_numeric)
+    num_pipeline = Pipeline([
+        ('imputer', SimpleImputer(strategy='median')),
+        ('std_scaler', StandardScaler())
+    ])
+    cat_pipeline = Pipeline([
+        ('imputer', SimpleImputer(strategy='most_frequent')),
+        ('ordinal_encoder', OrdinalEncoder()),
+    ])
+    column_transformer = ColumnTransformer([
+        ('numerical', num_pipeline, num_feature_names),
+        ('categorical', cat_pipeline, cat_feature_names),
+    ], remainder='passthrough')
+    col_names = num_feature_names + cat_feature_names
+    col_names += [feature for feature in data.columns if feature not in col_names]
+    data = pd.DataFrame(column_transformer.fit_transform(data), columns=col_names)
+    data.dropna(inplace=True)
+
+    X = data
     n_features = X.shape[-1]
     n_samples = len(X)
-
-    # data preprocessing
-    cat_columns = [
-        "checkingstatus", "history", "purpose", "savings", "employ", "status", "others", "property",
-        "otherplans", "housing", "job", "tele", "foreign"
-    ]
-    X[cat_columns] = OrdinalEncoder().fit_transform(X[cat_columns])
-    X = X.astype(float)
-    y = y.replace({1: 1, 2: 0})
     feature_names = list(X.columns)
 
     # train test split and get explanation datapoint -----------------------------------------------

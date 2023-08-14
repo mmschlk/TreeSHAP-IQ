@@ -110,7 +110,7 @@ def convert_tree_estimator(
         scaling: float = 1.,
         class_label: int = None,
         empty_prediction: float = None,
-        transform: callable = None
+        output_type: str = "raw"
 ) -> Union[TreeModel, list[TreeModel]]:
     """Converts a tree estimator to a dictionary or a list of dictionaries.
 
@@ -122,7 +122,6 @@ def convert_tree_estimator(
             problems. Defaults to None.
         empty_prediction (float): The prediction of the tree model when the input is empty.
             Defaults to None.
-        transform (callable): A callable to be applied to the leaf values. Defaults to None.
 
     Returns:
         Union[TreeModel, list[TreeModel]]: The converted tree estimator as either a mapping of node
@@ -132,9 +131,21 @@ def convert_tree_estimator(
     """
     if safe_isinstance(tree_model, "sklearn.tree.DecisionTreeRegressor") or \
             safe_isinstance(tree_model, "sklearn.tree.DecisionTreeClassifier"):
-        tree_values = tree_model.tree_.value.reshape(-1, 1).copy() * scaling
+        if safe_isinstance(tree_model, "sklearn.tree.DecisionTreeClassifier") and class_label is None:
+            class_label = 1
+        tree_values = tree_model.tree_.value.copy() * scaling
         if class_label is not None:
-            tree_values = tree_values[:, class_label]
+            # turn node values into probabilities
+            if len(tree_values.shape) == 3:
+                tree_values = tree_values / np.sum(tree_values, axis=2, keepdims=True)
+                tree_values = tree_values[:, 0, class_label]
+            else:
+                tree_values = tree_values / np.sum(tree_values, axis=1, keepdims=True)
+                tree_values = tree_values[:, class_label]
+            if output_type == "probability":
+                tree_values = tree_values * 0.01
+
+        tree_values = tree_values.flatten()
         return TreeModel(
             children_left=tree_model.tree_.children_left,
             children_right=tree_model.tree_.children_right,
@@ -160,8 +171,7 @@ def convert_tree_estimator(
         return [
             # GradientBoostedClassifier contains DecisionTreeRegressor as base_estimators
             convert_tree_estimator(
-                tree, scaling=learning_rate, class_label=None, empty_prediction=empty_prediction,
-                transform=expit
+                tree, scaling=learning_rate, class_label=None, empty_prediction=empty_prediction
             ) for tree in tree_model.estimators_[:, 0]
         ]
 
@@ -185,8 +195,9 @@ def convert_tree_estimator(
     if safe_isinstance(tree_model, "sklearn.ensemble.RandomForestRegressor") or \
             safe_isinstance(tree_model, "sklearn.ensemble.RandomForestClassifier"):
         scaling = 1.0 / len(tree_model.estimators_)
+        output_type = None if not safe_isinstance(tree_model, "sklearn.ensemble.RandomForestClassifier") else output_type
         return [
-            convert_tree_estimator(tree, scaling=scaling, class_label=class_label)
+            convert_tree_estimator(tree, scaling=scaling, class_label=class_label, output_type=output_type)
             for tree in tree_model.estimators_
         ]
 
@@ -503,7 +514,7 @@ class XGBTreeModelLoader(object):
                 children_right=self.node_cright[i],
                 features=self.features[i, :l],
                 thresholds=self.thresholds[i, :l],
-                values=self.values[i, :l],
+                values=self.values[i, :l].flatten(),
                 node_sample_weight=self.sum_hess[i]
             ))
         return trees

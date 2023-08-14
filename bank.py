@@ -1,57 +1,71 @@
-"""This module is used to run the experiment on the german-credit-risk dataset."""
+"""This module is used to run the experiment on the bank-marketing dataset."""
 import numpy as np
 import pandas as pd
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OrdinalEncoder
+from sklearn.datasets import fetch_openml
+
 from xgboost import XGBClassifier
 
 from experiment_main import run_main_experiment
 
 
+OPEN_ML_BANK_MARKETING_RENAME_MAPPER = {
+    'V1': 'age',
+    'V2': 'job',
+    'V3': 'marital',
+    'V4': 'education',
+    'V5': 'default',
+    'V6': 'balance',
+    'V7': 'housing',
+    'V8': 'loan',
+    'V9': 'contact',
+    'V10': 'day',
+    'V11': 'month',
+    'V12': 'duration',
+    'V13': 'campaign',
+    'V14': 'pdays',
+    'V15': 'previous',
+    'V16': 'poutcome'
+}
+
+
 if __name__ == "__main__":
 
-    # settings for the network plot image in the paper
-    # random_state = 42
-    # max_interaction_order = 2
-    # explanation_index = 1
-    # from sklearn.ensemble import GradientBoostingClassifier
-    # model = GradientBoostingClassifier(
-    #   max_depth=5, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0,
-    #   random_state=random_state
-    # )
-
-    # settings for the n-SII plot in the experiments section
-    # random_state = 42
-    # max_interaction_order = 7
-    # explanation_index = 1
-    # model = XGBClassifier()
-
-    dataset_name: str = "German Credit"
+    dataset_name: str = "Bank"
     classification: bool = True
     random_state: int = 42
 
-    max_interaction_order: int = 1
+    max_interaction_order: int = 2
     explanation_index: int = 1
 
     save_figures: bool = False
 
-    # load the german credit risk dataset from disc and pre-process --------------------------------
+    # load the bank-marketing dataset from openml and pre-process ----------------------------------
 
-    data = pd.read_csv("data/german_credit_risk.csv")
-    X = data.drop(columns=["GoodCredit"])
-    y = data["GoodCredit"]
+    data, y = fetch_openml(data_id=1461, return_X_y=True, as_frame=True)
+
+    # transform y from '1' and '2' to 0 and 1
+    y = y.apply(lambda x: 1 if x == '2' else 0)
+
+    data = data.rename(columns=OPEN_ML_BANK_MARKETING_RENAME_MAPPER)
+    num_feature_names = ['age', 'balance', 'duration', 'pdays', 'previous']
+    cat_feature_names = [
+        'job', 'marital', 'education', 'default', 'housing', 'loan', 'contact', 'day', 'month',
+        'campaign', 'poutcome'
+    ]
+    data[num_feature_names] = data[num_feature_names].apply(pd.to_numeric)
+    data[cat_feature_names] = OrdinalEncoder().fit_transform(data[cat_feature_names])
+    # TODO check for errors
+    col_names = num_feature_names + cat_feature_names
+    col_names += [feature for feature in data.columns if feature not in col_names]
+    data = pd.DataFrame(data, columns=col_names)
+    data.dropna(inplace=True)
+
+    X = data
     n_features = X.shape[-1]
     n_samples = len(X)
-
-    # data preprocessing
-    cat_columns = [
-        "checkingstatus", "history", "purpose", "savings", "employ", "status", "others", "property",
-        "otherplans", "housing", "job", "tele", "foreign"
-    ]
-    X[cat_columns] = OrdinalEncoder().fit_transform(X[cat_columns])
-    X = X.astype(float)
-    y = y.replace({1: 1, 2: 0})
     feature_names = list(X.columns)
 
     # train test split and get explanation datapoint -----------------------------------------------
