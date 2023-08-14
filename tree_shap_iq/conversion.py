@@ -154,13 +154,9 @@ def convert_tree_estimator(
             empty_prediction = deepcopy(tree_model.init_.prior[class_label])
             # TODO not validated
         elif safe_isinstance(tree_model.init_, "sklearn.dummy.DummyClassifier"):
-            #empty_prediction = logit(tree_model.init_.class_prior_[class_label])
             empty_prediction = logit(tree_model.init_.class_prior_[1])
         else:
             assert False, "Unsupported init model type: " + str(type(tree_model.init_))
-        #empty_prediction /= len(tree_model.estimators_)
-        #empty_prediction *= learning_rate
-        #empty_prediction = logit(empty_prediction)
         return [
             # GradientBoostedClassifier contains DecisionTreeRegressor as base_estimators
             convert_tree_estimator(
@@ -202,9 +198,14 @@ def convert_tree_estimator(
         base_offset = xgb_loader.base_score
         return copy.deepcopy(trees)
 
+    if safe_isinstance(tree_model, "xgboost.sklearn.XGBRegressor"):
+        import xgboost
+        model = tree_model.get_booster()
+        xgb_loader = XGBTreeModelLoader(model)
+        trees = xgb_loader.get_trees()
+        base_offset = xgb_loader.base_score
+        return copy.deepcopy(trees)
 
-
-    # TODO add support for classification by providing class label
     raise NotImplementedError(f"Conversion of {type(tree_model)} is not supported.")
 
 
