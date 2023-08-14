@@ -10,6 +10,13 @@ from experiment_main import run_main_experiment
 
 if __name__ == "__main__":
 
+    # Settings used for the force plot in the paper
+    # RANDOM_STATE = 42
+    # MAX_INTERACTION_ORDER = 2,3
+    # EXPLANATION_INDEX = 2
+    # force_limits = (0.4, 6.8)
+    # model = (max_depth=10, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0)
+
     RANDOM_STATE = 42
     MAX_INTERACTION_ORDER = 3
     EXPLANATION_INDEX = 2
@@ -43,7 +50,6 @@ if __name__ == "__main__":
     # fit a tree model -----------------------------------------------------------------------------
 
     model = GradientBoostingRegressor(
-        #max_depth=3, learning_rate=0.1, min_samples_leaf=5, n_estimators=2, max_features=1.0,
         max_depth=10, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0,
         random_state=RANDOM_STATE
     )

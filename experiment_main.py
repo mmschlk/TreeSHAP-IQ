@@ -53,7 +53,7 @@ def run_shap_iq(
         empty_prediction += explainer.empty_prediction
     print("Time taken", explanation_time)
     explanation_sum = np.sum(list(sii_values_dict[1])) + empty_prediction
-    if classification:  # TODO check if model is using odds or probas
+    if classification:  # we assume that every classifier uses logit as link function
         explanation_sum = expit(explanation_sum)
     print(sii_values_dict[1])
     print("Empty prediction", empty_prediction)
@@ -153,7 +153,7 @@ def run_main_experiment(
     if len(sv_shap) == 1:
         sv_shap = sv_shap[0]
     explanation_sum: float = np.sum(sv_shap) + empty_prediction
-    if classification:
+    if classification:  # we assume that every classifier uses logit as link function
         explanation_sum = expit(explanation_sum)
     print(sv_shap)
     print("Empty prediction", empty_prediction)
@@ -240,7 +240,6 @@ def run_main_experiment(
     plt.show() if show_plots else plt.close("all")
 
     # plot the waterfall plot ----------------------------------------------------------------------
-
 
     # SV waterfall plot
     shap_explanation = Explanation(

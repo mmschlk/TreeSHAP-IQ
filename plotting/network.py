@@ -76,6 +76,14 @@ def draw_interaction_network(
     the interactions. The edge width is proportional to the interaction value. The color of the edge
     is red if the interaction value is positive and blue if the interaction value is negative.
 
+    Args:
+        n_features: The number of features.
+        first_order_values: The first order values.
+        second_order_values: The second order values.
+        feature_names: The feature names.
+
+    Returns:
+        The figure and axis of the plot.
     """
     fig, axis = plt.subplots(figsize=(6, 6))
     axis.axis("off")
