@@ -57,10 +57,6 @@ if __name__ == "__main__":
     ]
     data[num_feature_names] = data[num_feature_names].apply(pd.to_numeric)
     data[cat_feature_names] = OrdinalEncoder().fit_transform(data[cat_feature_names])
-    # TODO check for errors
-    col_names = num_feature_names + cat_feature_names
-    col_names += [feature for feature in data.columns if feature not in col_names]
-    data = pd.DataFrame(data, columns=col_names)
     data.dropna(inplace=True)
 
     X = data

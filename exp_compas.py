@@ -1,6 +1,4 @@
 """This module is used to run the experiment on the compass dataset."""
-import random
-
 import numpy as np
 import pandas as pd
 
@@ -9,11 +7,6 @@ from xgboost import XGBClassifier
 
 from experiment_main import run_main_experiment
 
-
-cols = ['Two_yr_Recidivism', 'Number_of_Priors', 'score_factor',
-       'Age_Above_FourtyFive', 'Age_Below_TwentyFive', 'African_American',
-       'Asian', 'Hispanic', 'Native_American', 'Other', 'Female',
-       'Misdemeanor']
 
 COMPASS_RENAME_MAPPER = {
     "Two_yr_Recidivism": "Two_yr_Recidivism",
@@ -26,13 +19,7 @@ COMPASS_RENAME_MAPPER = {
     "Hispanic": "Hispanic",
     "Native_American": "Native_American",
     "Other": "Other",
-
-
 }
-
-list_of = [
-    1, 2, 8, 10, 12, 14, 17, 18, 24, 25, 26, 28, 33, 35, 36, 38, 39, 41, 43, 46
-]
 
 
 if __name__ == "__main__":
@@ -42,18 +29,14 @@ if __name__ == "__main__":
     random_state: int = 42
 
     max_interaction_order: int = 3
-    explanation_index: int = int(random.randint(0, 1000))
+    explanation_index: int = 1
 
-    save_figures: bool = True
+    save_figures: bool = False
 
     # load the german credit risk dataset from disc and pre-process --------------------------------
 
     data = pd.read_csv("data/compas/propublica_data_for_fairml.csv")
-
-    print(data.columns)
-
-    # print me all indices where the African_American feature is 1
-    print(data[data["African_American"] == 1].index[0:20])
+    data = data.rename(columns=COMPASS_RENAME_MAPPER)
 
     X = data.drop(columns=["Two_yr_Recidivism"])
     y = data["Two_yr_Recidivism"]

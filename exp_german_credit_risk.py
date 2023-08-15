@@ -1,6 +1,7 @@
 """This module is used to run the experiment on the german-credit-risk dataset."""
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import GradientBoostingClassifier
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OrdinalEncoder
@@ -25,16 +26,16 @@ if __name__ == "__main__":
     # random_state = 42
     # max_interaction_order = 7
     # explanation_index = 1
-    # model = XGBClassifier()
+    # model = XGBClassifier(random_state=random_state)
 
     dataset_name: str = "German Credit"
     classification: bool = True
     random_state: int = 42
 
-    max_interaction_order: int = 1
+    max_interaction_order: int = 2
     explanation_index: int = 1
 
-    save_figures: bool = False
+    save_figures: bool = True
 
     # load the german credit risk dataset from disc and pre-process --------------------------------
 
@@ -73,7 +74,10 @@ if __name__ == "__main__":
 
     # fit a tree model -----------------------------------------------------------------------------
 
-    model: XGBClassifier = XGBClassifier()
+    model = GradientBoostingClassifier(
+       max_depth=5, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0,
+       random_state=random_state
+    )
     model.fit(X_train, y_train)
     print("Accuracy on test data", model.score(X_test, y_test))
 

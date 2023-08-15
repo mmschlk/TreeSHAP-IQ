@@ -18,9 +18,9 @@ if __name__ == "__main__":
     # model = GradientBoostingRegressor(max_depth=10, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0)
 
     RANDOM_STATE = 42
-    MAX_INTERACTION_ORDER = 3
+    MAX_INTERACTION_ORDER = 2
     EXPLANATION_INDEX = 2
-    SAVE_FIGURES = True
+    SAVE_FIGURES = False
     dataset_name: str = "California"
 
     force_limits = (0.4, 6.8)
@@ -47,10 +47,12 @@ if __name__ == "__main__":
         X.values, X_train.values, X_test.values, y_train.values, y_test.values
     )
 
+    print("n_features", n_features, "n_samples", n_samples)
+
     # fit a tree model -----------------------------------------------------------------------------
 
     model = GradientBoostingRegressor(
-        max_depth=10, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0,
+        max_depth=3, learning_rate=0.1, min_samples_leaf=5, n_estimators=30, max_features=1.0,
         random_state=RANDOM_STATE
     )
     model.fit(X_train, y_train)

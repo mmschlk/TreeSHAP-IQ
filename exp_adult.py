@@ -19,7 +19,7 @@ if __name__ == "__main__":
     classification: bool = True
     random_state: int = 42
 
-    max_interaction_order: int = 1
+    max_interaction_order: int = 2
     explanation_index: int = 1
 
     save_figures: bool = False
@@ -38,23 +38,8 @@ if __name__ == "__main__":
         'workclass', 'education', 'marital-status', 'occupation', 'relationship', 'race', 'sex',
         'native-country', 'education-num'
     ]
-    # TODO check for errors
     data[num_feature_names] = data[num_feature_names].apply(pd.to_numeric)
-    num_pipeline = Pipeline([
-        ('imputer', SimpleImputer(strategy='median')),
-        ('std_scaler', StandardScaler())
-    ])
-    cat_pipeline = Pipeline([
-        ('imputer', SimpleImputer(strategy='most_frequent')),
-        ('ordinal_encoder', OrdinalEncoder()),
-    ])
-    column_transformer = ColumnTransformer([
-        ('numerical', num_pipeline, num_feature_names),
-        ('categorical', cat_pipeline, cat_feature_names),
-    ], remainder='passthrough')
-    col_names = num_feature_names + cat_feature_names
-    col_names += [feature for feature in data.columns if feature not in col_names]
-    data = pd.DataFrame(column_transformer.fit_transform(data), columns=col_names)
+    data[cat_feature_names] = OrdinalEncoder().fit_transform(data[cat_feature_names])
     data.dropna(inplace=True)
 
     X = data

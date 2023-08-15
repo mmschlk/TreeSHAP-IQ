@@ -1,6 +1,7 @@
 """This module is used to run the experiment on the titanic sklearn dataset."""
 import numpy as np
 import pandas as pd
+from sklearn.impute import SimpleImputer
 
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
@@ -14,14 +15,14 @@ if __name__ == "__main__":
     RANDOM_STATE = 42
     MAX_INTERACTION_ORDER = 2
     EXPLANATION_INDEX = 1
-    SAVE_FIGURES = True
+    SAVE_FIGURES = False
     dataset_name: str = "Titanic"
 
     force_limits = None
 
     # load the titanic dataset from disc and pre-process -------------------------------------------
     data = pd.read_csv("data/titanic.csv")
-    X = data.drop(columns=["Survived"])
+    X = data.drop(columns=["Survived", "PassengerId", "Name"])
     y = data["Survived"]
 
     # drop rows with missing values
@@ -33,17 +34,18 @@ if __name__ == "__main__":
         "Sex", "Ticket", "Cabin", "Embarked"
     ]
     X[cat_feature_names] = OrdinalEncoder().fit_transform(X[cat_feature_names])
-
-    # drop PassengerId, Name
-    X = X.drop(columns=["PassengerId", "Name"])
-
-    # convert to float
+    X[cat_feature_names] = SimpleImputer(strategy='most_frequent').fit_transform(X[cat_feature_names])
+    num_feature_names = list(set(X.columns) - set(cat_feature_names))
+    X[num_feature_names] = X[num_feature_names].apply(pd.to_numeric)
+    X[num_feature_names] = SimpleImputer(strategy='median').fit_transform(X[num_feature_names])
     X = X.astype(float)
 
     # get the feature names
     feature_names = list(X.columns)
     n_features = X.shape[-1]
     n_samples = len(X)
+
+    print("n_features", n_features, "n_samples", n_samples)
 
     # train test split and get explanation datapoint -----------------------------------------------
 
@@ -62,7 +64,6 @@ if __name__ == "__main__":
 
     # fit a tree model -----------------------------------------------------------------------------
     model = RandomForestClassifier(random_state=RANDOM_STATE)
-   # model = DecisionTreeClassifier(random_state=RANDOM_STATE)
     model.fit(X_train, y_train)
     print("Accuracy", model.score(X_test, y_test))
 

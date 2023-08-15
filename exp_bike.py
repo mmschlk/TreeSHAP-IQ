@@ -1,6 +1,4 @@
 """This module is used to run the experiment on the bike sharing dataset."""
-import random
-
 import numpy as np
 import pandas as pd
 
@@ -20,9 +18,9 @@ if __name__ == "__main__":
     random_state: int = 42
 
     max_interaction_order: int = 4
-    explanation_index: int = int(random.randint(0, 1000))
+    explanation_index: int = 0
 
-    save_figures: bool = True
+    save_figures: bool = False
 
     # load the bike sharing dataset from openml and pre-process ------------------------------------
 
