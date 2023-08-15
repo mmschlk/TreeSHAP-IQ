@@ -3,6 +3,7 @@ import networkx as nx
 import numpy as np
 from matplotlib import pyplot as plt
 from colour import Color
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 from tree_shap_iq.utils import powerset
 
@@ -62,6 +63,53 @@ def _add_weight_to_edges_in_graph(
         graph_edge = graph.get_edge_data(*edge)
         graph_edge['width'] = size * (size_scaler + 1)
         graph_edge['color'] = color
+
+
+def _add_legend_to_axis(axis: plt.Axes) -> None:
+    """Adds a legend for order 1 (nodes) and order 2 (edges) interactions to the axis."""
+    sizes = [1., 0.2, 0.2, 1]
+    labels = ['high neg.', 'low neg.', 'low pos.', 'high pos.']
+    alphas_line = [0.5, 0.2, 0.2, 0.5]
+
+    # order 1 (circles)
+    plot_circles = []
+    for i in range(4):
+        size = sizes[i]
+        if i < 2:
+            color = BLUE.hex
+        else:
+            color = RED.hex
+        circle = axis.plot([], [], c=color, marker='o', markersize=size * 8, linestyle='None')
+        plot_circles.append(circle[0])
+
+    legend1 = plt.legend(
+        plot_circles, labels,
+        frameon=True, framealpha=0.5, facecolor='white', title=r"$\bf{Order\ 1}$",
+        fontsize=7, labelspacing=0.5, handletextpad=0.5, borderpad=0.5, handlelength=1.5,
+        bbox_to_anchor=(1.12, 1.), title_fontsize=7, loc='upper right'
+    )
+
+    # order 2 (lines)
+    plot_lines = []
+    for i in range(4):
+        size = sizes[i]
+        alpha = alphas_line[i]
+        if i < 2:
+            color = BLUE.hex
+        else:
+            color = RED.hex
+        line = axis.plot([], [], c=color, linewidth=size * 3, alpha=alpha)
+        plot_lines.append(line[0])
+
+    legend2 = plt.legend(
+        plot_lines, labels,
+        frameon=True, framealpha=0.5, facecolor='white', title=r"$\bf{Order\ 2}$",
+        fontsize=7, labelspacing=0.5, handletextpad=0.5, borderpad=0.5, handlelength=1.5,
+        bbox_to_anchor=(1.12, 0.84), title_fontsize=7, loc='upper right'
+    )
+
+    axis.add_artist(legend1)
+    axis.add_artist(legend2)
 
 
 def draw_interaction_network(
@@ -133,5 +181,7 @@ def draw_interaction_network(
         y = radius * np.sin(theta)
 
         axis.text(x, y, label, horizontalalignment='center', verticalalignment='center')
+
+    _add_legend_to_axis(axis)
 
     return fig, axis

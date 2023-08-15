@@ -190,7 +190,8 @@ def run_main_experiment(
                                      f"Model output: {model_output}, True label: {y_true_label}"
         axis_network.set_title(title_network)
         if save_figures:
-            fig_network.savefig(save_name + "_network.pdf", bbox_inches="tight")
+            fig_network.subplots_adjust(bottom=0.01, top=0.9, left=0.05, right=0.9)
+            fig_network.savefig(save_name + "_network.pdf", bbox_inches=None)
         fig_network.show() if show_plots else plt.close("all")
 
     # plot the force plots -------------------------------------------------------------------------
