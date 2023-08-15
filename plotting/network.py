@@ -3,15 +3,12 @@ import networkx as nx
 import numpy as np
 from matplotlib import pyplot as plt
 from colour import Color
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 from tree_shap_iq.utils import powerset
 
 RED = Color("#ff0d57")
 BLUE = Color("#1e88e5")
 NEUTRAL = Color("#ffffff")
-#RED_COLORS = list(BLUE.range_to(RED, 1001))
-#BLUE_COLORS = list(RED.range_to(BLUE, 1001))
 
 
 def _get_color(value: float) -> str:
@@ -68,7 +65,7 @@ def _add_weight_to_edges_in_graph(
 def _add_legend_to_axis(axis: plt.Axes) -> None:
     """Adds a legend for order 1 (nodes) and order 2 (edges) interactions to the axis."""
     sizes = [1., 0.2, 0.2, 1]
-    labels = ['high neg.', 'low neg.', 'low pos.', 'high pos.']
+    labels = ['high pos.', 'low pos.', 'low neg.', 'high neg.']
     alphas_line = [0.5, 0.2, 0.2, 0.5]
 
     # order 1 (circles)
@@ -76,9 +73,9 @@ def _add_legend_to_axis(axis: plt.Axes) -> None:
     for i in range(4):
         size = sizes[i]
         if i < 2:
-            color = BLUE.hex
-        else:
             color = RED.hex
+        else:
+            color = BLUE.hex
         circle = axis.plot([], [], c=color, marker='o', markersize=size * 8, linestyle='None')
         plot_circles.append(circle[0])
 
@@ -95,9 +92,9 @@ def _add_legend_to_axis(axis: plt.Axes) -> None:
         size = sizes[i]
         alpha = alphas_line[i]
         if i < 2:
-            color = BLUE.hex
-        else:
             color = RED.hex
+        else:
+            color = BLUE.hex
         line = axis.plot([], [], c=color, linewidth=size * 3, alpha=alpha)
         plot_lines.append(line[0])
 
