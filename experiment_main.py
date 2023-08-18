@@ -173,12 +173,13 @@ def run_main_experiment(
         shap_empty_pred = explainer_shap.expected_value
     if len(sv_shap) == 1:
         sv_shap = sv_shap[0]
-    explanation_sum: float = np.sum(sv_shap) + empty_prediction
+    explanation_sum: float = float(np.sum(sv_shap) + shap_empty_pred)
+    explanation_sum_sigmoid: float = explanation_sum
     if classification:  # we assume that every classifier uses logit as link function
-        explanation_sum = expit(explanation_sum)
+        explanation_sum_sigmoid = expit(explanation_sum)
     print(sv_shap)
-    print("Empty prediction", empty_prediction)
-    print("Sum", explanation_sum)
+    print("Empty prediction", shap_empty_pred)
+    print("Sum", explanation_sum, explanation_sum_sigmoid)
 
     # plot the n-SII values ------------------------------------------------------------------------
 

@@ -30,12 +30,12 @@ if __name__ == "__main__":
     classification: bool = True
     random_state: int = 42
 
-    max_interaction_order: int = 2
-    explanation_index: int = 1
+    max_interaction_order: int = 3
+    explanation_index: int = 7
 
     save_figures: bool = True
 
-    model_flag: str = "GBT"  # "XGB" or "RF", "DT", "GBT", None
+    model_flag: str = "XGB"  # "XGB" or "RF", "DT", "GBT", None
     if model_flag is not None:
         print("Model:", model_flag)
 

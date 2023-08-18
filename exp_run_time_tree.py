@@ -10,7 +10,6 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 
-
 from tree_shap_iq import TreeShapIQ
 from tree_shap_iq.conversion import convert_tree_estimator
 
@@ -20,7 +19,7 @@ if __name__ == "__main__":
 
     n_iterations: int = 10
     max_interaction_order_params: list[int] = [1, 2, 3, 4, 5, 6]
-    max_depth_params = [35]
+    max_depth_params = [25]
 
     # get data -------------------------------------------------------------------------------------
 
@@ -131,4 +130,4 @@ if __name__ == "__main__":
     # save data -----------------------------------------------------------------------------------
     print("Finished all experiments")
     data_df = pd.DataFrame(data_storage)
-    data_df.to_csv(f"run_time_interaction_{str(depth)}.csv", index=False)
+    data_df.to_csv(f"run_time/run_time_interaction_{str(depth)}.csv", index=False)

@@ -3,7 +3,9 @@ import numpy as np
 
 from sklearn.model_selection import train_test_split
 from sklearn.datasets import fetch_california_housing
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+from sklearn.tree import DecisionTreeRegressor
+from xgboost import XGBRegressor
 
 from experiment_main import run_main_experiment
 
@@ -11,19 +13,23 @@ from experiment_main import run_main_experiment
 if __name__ == "__main__":
 
     # Settings used for the force plot in the paper
-    # RANDOM_STATE = 42
+    # random_state = 42
     # MAX_INTERACTION_ORDER = 2,3
     # EXPLANATION_INDEX = 2
     # force_limits = (0.4, 6.8)
     # model = GradientBoostingRegressor(max_depth=10, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0)
 
-    RANDOM_STATE = 42
+    random_state = 42
     MAX_INTERACTION_ORDER = 2
-    EXPLANATION_INDEX = 2
-    SAVE_FIGURES = False
+    EXPLANATION_INDEX = 3
+    SAVE_FIGURES = True
     dataset_name: str = "California"
 
     force_limits = (0.4, 6.8)
+
+    model_flag: str = "GBT"  # "XGB" or "RF", "DT", "GBT", None
+    if model_flag is not None:
+        print("Model:", model_flag)
 
     # load the california housing dataset and pre-process ------------------------------------------
     data = fetch_california_housing(as_frame=True)
@@ -35,7 +41,7 @@ if __name__ == "__main__":
     # train test split and get explanation datapoint -----------------------------------------------
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, train_size=0.7, shuffle=True, random_state=RANDOM_STATE)
+        X, y, train_size=0.7, shuffle=True, random_state=random_state)
     explanation_id = X_test.index[EXPLANATION_INDEX]
 
     # get explanation datapoint and index
@@ -51,10 +57,15 @@ if __name__ == "__main__":
 
     # fit a tree model -----------------------------------------------------------------------------
 
-    model = GradientBoostingRegressor(
-        max_depth=3, learning_rate=0.1, min_samples_leaf=5, n_estimators=30, max_features=1.0,
-        random_state=RANDOM_STATE
-    )
+    if model_flag == "RF":
+        model: RandomForestRegressor = RandomForestRegressor(random_state=random_state, n_estimators=20, max_depth=10)
+    elif model_flag == "DT":
+        model: DecisionTreeRegressor = DecisionTreeRegressor(random_state=random_state)
+    elif model_flag == "GBT":
+        model: GradientBoostingRegressor = GradientBoostingRegressor(max_depth=10, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0, random_state=random_state)
+    else:
+        model: XGBRegressor = XGBRegressor(random_state=random_state)
+
     model.fit(X_train, y_train)
     print("R^2 on test data", model.score(X_test, y_test))
 
@@ -72,5 +83,6 @@ if __name__ == "__main__":
         background_dataset=X,
         observational=True,
         save_figures=SAVE_FIGURES,
-        force_limits=force_limits
+        force_limits=force_limits,
+        model_flag=model_flag
     )

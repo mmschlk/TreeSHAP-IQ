@@ -21,7 +21,6 @@ if __name__ == "__main__":
     SAVE_FIGURES = False
     dataset_name: str = "Titanic"
 
-
     EXPLANATION_INDEX = 10
     explanation_direction = 0
 

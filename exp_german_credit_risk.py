@@ -1,12 +1,12 @@
 """This module is used to run the experiment on the german-credit-risk dataset."""
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
-#from sklearn.ensemble import GradientBoostingClassifier
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OrdinalEncoder
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+
 from xgboost import XGBClassifier
 
 from experiment_main import run_main_experiment
@@ -34,12 +34,12 @@ if __name__ == "__main__":
     classification: bool = True
     random_state: int = 42
 
-    max_interaction_order: int = 1
-    explanation_index: int = 2
+    max_interaction_order: int = 2
+    explanation_index: int = 13  # 13, 14
 
     save_figures: bool = True
 
-    model_flag: str = "GBT"  # "XGB" or "RF", "DT", "GBT", None
+    model_flag: str = "XGB"  # "XGB" or "RF", "DT", "GBT", None
     if model_flag is not None:
         print("Model:", model_flag)
 
@@ -94,10 +94,7 @@ if __name__ == "__main__":
     else:
         model: XGBClassifier = XGBClassifier(random_state=random_state)
     model.fit(X_train, y_train)
-    print(model.predict(x_explain.reshape(1, -1)),
-          model.predict_proba(x_explain.reshape(1, -1)),
-          model.predict_log_proba(x_explain.reshape(1, -1))
-          )
+
     print("Accuracy on test data", model.score(X_test, y_test))
 
     # run the experiment --------------------------------------------------------------------------
@@ -115,7 +112,7 @@ if __name__ == "__main__":
         observational=True,
         save_figures=save_figures,
         classification=classification,
-        class_label=0,
+        class_label=y_true_label,
         show_plots=True,
         model_flag=model_flag
     )
