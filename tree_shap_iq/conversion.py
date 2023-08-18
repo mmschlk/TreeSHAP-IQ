@@ -143,8 +143,7 @@ def convert_tree_estimator(
                 tree_values = tree_values / np.sum(tree_values, axis=1, keepdims=True)
                 tree_values = tree_values[:, class_label]
             if output_type == "probability":
-                tree_values = tree_values * 0.01
-
+                tree_values = tree_values
         tree_values = tree_values.flatten()
         return TreeModel(
             children_left=tree_model.tree_.children_left,

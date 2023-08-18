@@ -79,14 +79,27 @@ def run_main_experiment(
         force_limits: tuple[float, float] = None,
         sv_dim: int = None,
         output_type: str = "raw",
+        model_flag: str = None,
+        class_label: int = None,
 ) -> None:
 
     title: str = f"{dataset_name}: "
     save_name: str = f"plots/{dataset_name.lower().replace(' ', '_')}"
+    if model_flag is not None:
+        save_name += f"_{model_flag}"
+        title = f"{dataset_name} {model_flag}: "
     save_name += f"_instance_{explanation_id}_order_{max_interaction_order}"
 
     # create feature names
-    feature_names_abbrev = [feature[:5] + "." for feature in feature_names]
+    feature_names_abbrev = []
+    for feature_name in feature_names:
+        small_feature_name = feature_name[:5]
+        # if the 5th character is a ' ' or '_' or '-' we want to extend the name by two characters
+        if small_feature_name[-1] in [" ", "_", "-"]:
+            small_feature_name += feature_name[5]
+        feature_names_abbrev.append(small_feature_name + ".")
+
+    #feature_names_abbrev = [feature[:5] + "." for feature in feature_names]
     feature_names_values = [feature + f"\n({round(x_explain[i], 2)})"
                             for i, feature in enumerate(feature_names_abbrev)]
 
@@ -107,7 +120,8 @@ def run_main_experiment(
         print("Model output", model_output, "True label", y_true_label)
 
     # convert the tree -----------------------------------------------------------------------------
-    class_label = None if not classification else 1
+    if class_label is None:
+        class_label = None if not classification else 1
     tree_model = convert_tree_estimator(model, class_label=class_label, output_type=output_type)
 
     # explain with TreeShapIQ observational --------------------------------------------------------
@@ -149,7 +163,10 @@ def run_main_experiment(
     x_explain_sv = copy(x_explain.reshape(1, -1))
     sv_shap = explainer_shap.shap_values(x_explain_sv).copy()
     if sv_dim is not None:
-        sv_shap = sv_shap[sv_dim]
+        try:
+            sv_shap = sv_shap[sv_dim]
+        except IndexError:
+            sv_shap = sv_shap
     try:
         shap_empty_pred = explainer_shap.expected_value[0]
     except IndexError:
@@ -171,7 +188,7 @@ def run_main_experiment(
         feature_names=feature_names_abbrev,
         n_sii_order=max_interaction_order
     )
-    axis_obs.set_title(title + f"n-SII for instance {explanation_id}")
+    axis_obs.set_title(title + f"n-SII plot for instance {explanation_id}")
     if save_figures:
         fig_obs.savefig(save_name + "_n_sii.pdf", bbox_inches="tight")
     fig_obs.show() if show_plots else plt.close("all")
@@ -187,7 +204,8 @@ def run_main_experiment(
             n_features=n_features,
         )
         title_network: str = title + f"n-SII network plot for instance {explanation_id}\n" \
-                                     f"Model output: {model_output}, True label: {y_true_label}"
+                                     f"Model output: {str(round(model_output, 2))}, " \
+                                     f"True label: {y_true_label}"
         axis_network.set_title(title_network)
         if save_figures:
             fig_network.subplots_adjust(bottom=0.01, top=0.9, left=0.05, right=0.9)

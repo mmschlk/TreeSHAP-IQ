@@ -1,10 +1,12 @@
 """This module is used to run the experiment on the bank-marketing dataset."""
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OrdinalEncoder
 from sklearn.datasets import fetch_openml
+from sklearn.tree import DecisionTreeClassifier
 
 from xgboost import XGBClassifier
 
@@ -38,9 +40,13 @@ if __name__ == "__main__":
     random_state: int = 42
 
     max_interaction_order: int = 2
-    explanation_index: int = 1
+    explanation_index: int = 0
 
-    save_figures: bool = False
+    save_figures: bool = True
+
+    model_flag: str = "XGB"  # "XGB" or "RF", "DT", "GBT", None
+    if model_flag is not None:
+        print("Model:", model_flag)
 
     # load the bank-marketing dataset from openml and pre-process ----------------------------------
 
@@ -83,7 +89,16 @@ if __name__ == "__main__":
 
     # fit a tree model -----------------------------------------------------------------------------
 
-    model: XGBClassifier = XGBClassifier()
+    if model_flag == "RF":
+        model: RandomForestClassifier = RandomForestClassifier(random_state=random_state,
+                                                               n_estimators=20, max_depth=10)
+    elif model_flag == "DT":
+        model: DecisionTreeClassifier = DecisionTreeClassifier(random_state=random_state,
+                                                               max_depth=10)
+    elif model_flag == "GBT":
+        model: GradientBoostingClassifier = GradientBoostingClassifier(random_state=random_state)
+    else:
+        model: XGBClassifier = XGBClassifier(random_state=random_state)
     model.fit(X_train, y_train)
     print("Accuracy on test data", model.score(X_test, y_test))
 
@@ -102,5 +117,6 @@ if __name__ == "__main__":
         observational=True,
         save_figures=save_figures,
         classification=classification,
-        show_plots=True
+        show_plots=True,
+        model_flag=model_flag
     )

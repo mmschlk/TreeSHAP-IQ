@@ -1,10 +1,12 @@
 """This module is used to run the experiment on the german-credit-risk dataset."""
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+#from sklearn.ensemble import GradientBoostingClassifier
 
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OrdinalEncoder
+from sklearn.tree import DecisionTreeClassifier
 from xgboost import XGBClassifier
 
 from experiment_main import run_main_experiment
@@ -32,10 +34,14 @@ if __name__ == "__main__":
     classification: bool = True
     random_state: int = 42
 
-    max_interaction_order: int = 2
-    explanation_index: int = 1
+    max_interaction_order: int = 1
+    explanation_index: int = 2
 
     save_figures: bool = True
+
+    model_flag: str = "GBT"  # "XGB" or "RF", "DT", "GBT", None
+    if model_flag is not None:
+        print("Model:", model_flag)
 
     # load the german credit risk dataset from disc and pre-process --------------------------------
 
@@ -74,11 +80,24 @@ if __name__ == "__main__":
 
     # fit a tree model -----------------------------------------------------------------------------
 
-    model = GradientBoostingClassifier(
-       max_depth=5, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0,
-       random_state=random_state
-    )
+    if model_flag == "RF":
+        model: RandomForestClassifier = RandomForestClassifier(random_state=random_state,
+                                                               n_estimators=20, max_depth=10)
+    elif model_flag == "DT":
+        model: DecisionTreeClassifier = DecisionTreeClassifier(random_state=random_state,
+                                                               max_depth=10)
+    elif model_flag == "GBT":
+        model: GradientBoostingClassifier = GradientBoostingClassifier(
+            max_depth=5, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0,
+            random_state=random_state
+        )
+    else:
+        model: XGBClassifier = XGBClassifier(random_state=random_state)
     model.fit(X_train, y_train)
+    print(model.predict(x_explain.reshape(1, -1)),
+          model.predict_proba(x_explain.reshape(1, -1)),
+          model.predict_log_proba(x_explain.reshape(1, -1))
+          )
     print("Accuracy on test data", model.score(X_test, y_test))
 
     # run the experiment --------------------------------------------------------------------------
@@ -96,5 +115,7 @@ if __name__ == "__main__":
         observational=True,
         save_figures=save_figures,
         classification=classification,
-        show_plots=True
+        class_label=0,
+        show_plots=True,
+        model_flag=model_flag
     )

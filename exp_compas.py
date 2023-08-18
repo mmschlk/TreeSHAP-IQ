@@ -1,8 +1,10 @@
 """This module is used to run the experiment on the compass dataset."""
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 
 from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
 from xgboost import XGBClassifier
 
 from experiment_main import run_main_experiment
@@ -24,14 +26,18 @@ COMPASS_RENAME_MAPPER = {
 
 if __name__ == "__main__":
 
-    dataset_name: str = "Compass"
+    dataset_name: str = "COMPAS"
     classification: bool = True
     random_state: int = 42
 
-    max_interaction_order: int = 3
+    max_interaction_order: int = 2
     explanation_index: int = 1
 
-    save_figures: bool = False
+    save_figures: bool = True
+
+    model_flag: str = "GBT"  # "XGB" or "RF", "DT", "GBT", None
+    if model_flag is not None:
+        print("Model:", model_flag)
 
     # load the german credit risk dataset from disc and pre-process --------------------------------
 
@@ -67,7 +73,15 @@ if __name__ == "__main__":
 
     # fit a tree model -----------------------------------------------------------------------------
 
-    model: XGBClassifier = XGBClassifier(random_state=random_state)
+    if model_flag == "RF":
+        model: RandomForestClassifier = RandomForestClassifier(random_state=random_state,
+                                                               n_estimators=20, max_depth=10)
+    elif model_flag == "DT":
+        model: DecisionTreeClassifier = DecisionTreeClassifier(random_state=random_state)
+    elif model_flag == "GBT":
+        model: GradientBoostingClassifier = GradientBoostingClassifier(random_state=random_state)
+    else:
+        model: XGBClassifier = XGBClassifier(random_state=random_state)
     model.fit(X_train, y_train)
     print("Accuracy on test data", model.score(X_test, y_test))
 
@@ -86,5 +100,6 @@ if __name__ == "__main__":
         observational=True,
         save_figures=save_figures,
         classification=classification,
-        show_plots=True
+        show_plots=True,
+        model_flag=model_flag,
     )

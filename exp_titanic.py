@@ -4,30 +4,37 @@ import pandas as pd
 from sklearn.impute import SimpleImputer
 
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import OrdinalEncoder
+from sklearn.tree import DecisionTreeClassifier
+from xgboost import XGBClassifier
 
 from experiment_main import run_main_experiment
 
 
 if __name__ == "__main__":
 
-    RANDOM_STATE = 42
-    MAX_INTERACTION_ORDER = 2
-    EXPLANATION_INDEX = 1
+    random_state = 42
+
+    MAX_INTERACTION_ORDER = 3
+
     SAVE_FIGURES = False
     dataset_name: str = "Titanic"
 
+
+    EXPLANATION_INDEX = 10
+    explanation_direction = 0
+
     force_limits = None
+
+    model_flag: str = "GBT"  # "XGB" or "RF", "DT", "GBT", None
+    if model_flag is not None:
+        print("Model:", model_flag)
 
     # load the titanic dataset from disc and pre-process -------------------------------------------
     data = pd.read_csv("data/titanic.csv")
     X = data.drop(columns=["Survived", "PassengerId", "Name"])
     y = data["Survived"]
-
-    # drop rows with missing values
-    X = X.dropna()
-    y = y[X.index]
 
     # ordinal encode categorical features
     cat_feature_names = [
@@ -50,7 +57,7 @@ if __name__ == "__main__":
     # train test split and get explanation datapoint -----------------------------------------------
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, train_size=0.7, shuffle=True, random_state=RANDOM_STATE)
+        X, y, train_size=0.7, shuffle=True, random_state=random_state)
     explanation_id = X_test.index[EXPLANATION_INDEX]
 
     # get explanation datapoint and index
@@ -63,9 +70,17 @@ if __name__ == "__main__":
     )
 
     # fit a tree model -----------------------------------------------------------------------------
-    model = RandomForestClassifier(random_state=RANDOM_STATE)
+
+    if model_flag == "RF":
+        model: RandomForestClassifier = RandomForestClassifier(random_state=random_state, n_estimators=20, max_depth=10)
+    elif model_flag == "DT":
+        model: DecisionTreeClassifier = DecisionTreeClassifier(random_state=random_state, max_depth=10)
+    elif model_flag == "GBT":
+        model: GradientBoostingClassifier = GradientBoostingClassifier(random_state=random_state)
+    else:
+        model: XGBClassifier = XGBClassifier(random_state=random_state)
     model.fit(X_train, y_train)
-    print("Accuracy", model.score(X_test, y_test))
+    print("Accuracy on test data", model.score(X_test, y_test))
 
     # run the experiment --------------------------------------------------------------------------
 
@@ -82,7 +97,9 @@ if __name__ == "__main__":
         observational=True,
         save_figures=SAVE_FIGURES,
         force_limits=force_limits,
-        sv_dim=1,
+        sv_dim=explanation_direction,
         classification=True,
         output_type="probability",
+        model_flag=model_flag,
+        class_label=explanation_direction
     )
