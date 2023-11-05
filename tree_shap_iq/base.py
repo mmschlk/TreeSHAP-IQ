@@ -581,7 +581,6 @@ class TreeShapIQ:
             max_order: int = 1
     ):
         """Computes the Shapley values and interactions using brute force method (enumeration)."""
-        #self.shapley_values: np.ndarray = np.zeros(self.n_features, dtype=float)
 
         # Evaluate model for every subset
         counter_subsets = 0

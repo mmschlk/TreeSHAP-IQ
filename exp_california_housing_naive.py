@@ -139,11 +139,11 @@ if __name__ == "__main__":
 
     print("TreeSHAP-IQ")
     print("Time", explanation_time)
-    #print(sii_values_dict)
+    print(sii_values_dict)
     print("Empty prediction:", empty_prediction)
     print()
 
     print("Naive")
     print("Time", explanation_time_naive)
-    #print(sii_values_naive_dict)
+    print(sii_values_naive_dict)
     print("Empty prediction:", empty_prediction_naive)
