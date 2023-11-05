@@ -574,3 +574,86 @@ class TreeShapIQ:
             weights[left_child] = weights[node_id] * left_proportion
             weights[right_child] = weights[node_id] * right_proportion
         return weights
+
+    def explain_brute_force(
+            self,
+            x: np.ndarray,
+            max_order: int = 1
+    ):
+        """Computes the Shapley values and interactions using brute force method (enumeration)."""
+        #self.shapley_values: np.ndarray = np.zeros(self.n_features, dtype=float)
+
+        # Evaluate model for every subset
+        counter_subsets = 0
+        subset_values = np.zeros(2 ** self.n_features)
+        position_lookup = {}
+        for S in powerset(range(self.n_features)):
+            subset_values[counter_subsets] = self._naive_shapley_recursion(x, S, 0, 1)
+            position_lookup[S] = counter_subsets
+            counter_subsets += 1
+
+        # Aggregate subsets for the shapley values / interactions
+        shapley_interactions = {}
+        shapley_interactions_lookup = {}
+        for order in range(max_order + 1):
+            if order == 0:
+                shapley_interactions[order] = subset_values[position_lookup[()]]
+            else:
+                si = self._compute_shapley_from_subsets(subset_values, position_lookup, order)
+                shapley_interactions[order], shapley_interactions_lookup[order] = si
+        return shapley_interactions, shapley_interactions_lookup
+
+    def _compute_shapley_from_subsets(
+            self,
+            subset_values: np.ndarray,
+            position_lookup: dict,
+            order: int = 1
+    ):
+        features = range(self.n_features)
+        shapley_interactions = np.zeros(int(binom(self.n_features, order)))
+        shapley_interactions_lookup = {}
+        counter_interactions = 0
+        for S in powerset(features, min_size=order):
+            temp_values = 0
+            for T in powerset(set(features) - set(S)):
+                weight_T = self._get_subset_weight(len(T), len(S))
+                for L in powerset(S):
+                    subset = tuple(sorted(L + T))
+                    pos = position_lookup[subset]
+                    temp_values += weight_T * (-1) ** (order - len(L)) * subset_values[pos]
+            shapley_interactions[counter_interactions] = temp_values
+            shapley_interactions_lookup[counter_interactions] = S
+            counter_interactions += 1
+        return shapley_interactions, shapley_interactions_lookup
+
+    def _naive_shapley_recursion(
+            self,
+            x: np.ndarray[float],
+            S: tuple,
+            node_id: int,
+            weight: float
+    ):
+        threshold = self.thresholds[node_id]
+        feature_id = self.features[node_id]
+        if self.leaf_mask[node_id]:
+            return self.values[node_id] * weight
+        else:
+            if feature_id in S:
+                if x[feature_id] <= threshold:
+                    subset_val_right = 0
+                    subset_val_left = self._naive_shapley_recursion(x, S,
+                                                                    self.children_left[node_id],
+                                                                    weight)
+                else:
+                    subset_val_left = 0
+                    subset_val_right = self._naive_shapley_recursion(x, S,
+                                                                     self.children_right[node_id],
+                                                                     weight)
+            else:
+                subset_val_left = self._naive_shapley_recursion(
+                    x, S, self.children_left[node_id],
+                    weight * self.split_weights[self.children_left[node_id]])
+                subset_val_right = self._naive_shapley_recursion(
+                    x, S, self.children_right[node_id],
+                    weight * self.split_weights[self.children_right[node_id]])
+        return subset_val_left + subset_val_right
