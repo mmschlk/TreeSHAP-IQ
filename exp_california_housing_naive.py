@@ -24,10 +24,11 @@ if __name__ == "__main__":
     # model = GradientBoostingRegressor(max_depth=10, learning_rate=0.1, min_samples_leaf=5, n_estimators=100, max_features=1.0)
 
     random_state = 42
-    MAX_INTERACTION_ORDER = 2
+    MAX_INTERACTION_ORDER = 1
     EXPLANATION_INDEX = 2
-    n_dummy_features = 4
+    n_dummy_features = 0
     dataset_name: str = "California"
+    interaction_type = "BZF"  # "SII", "STI", "FSI", "BZF"
 
     model_flag: str = "DT"  # "XGB" or "RF", "DT", "GBT", None
     if model_flag is not None:
@@ -100,7 +101,7 @@ if __name__ == "__main__":
             max_interaction_order=MAX_INTERACTION_ORDER,
             observational=True,
             n_features=n_features,
-            interaction_type="SII"
+            interaction_type=interaction_type
         )
         start_time = time.time()
         explanation_scores: dict[int, np.ndarray] = explainer.explain(x=x_explain)
@@ -118,7 +119,7 @@ if __name__ == "__main__":
             max_interaction_order=MAX_INTERACTION_ORDER,
             observational=True,
             n_features=n_features,
-            interaction_type="SII"
+            interaction_type=interaction_type
         )
         #explainer_naive.values = explainer.values - explainer_naive.empty_prediction
         start_time = time.time()
