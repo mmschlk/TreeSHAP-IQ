@@ -1002,7 +1002,7 @@ class TreeShapIQ:
 
     def _get_subset_weight(self,t,order):
         if self.interaction_type == "SII":
-            return 1/(self.n_features*binom(self.n_features-order,t))
+            return 1/((self.n_features-order+1)*binom(self.n_features-order,t))
         if self.interaction_type == "STI":
             return self.interaction_order/(self.n_features*binom(self.n_features-1,t))
         if self.interaction_type == "FSI":
