@@ -1,5 +1,6 @@
 """This module is for plotting the run-time experiment results."""
 import copy
+import os
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -7,14 +8,14 @@ from scipy.stats import pearsonr
 
 if __name__ == "__main__":
     # Path to the CSV file
-    path = '/home/ffumagalli/GitHub/LinearTreeShapleyInteractions/'
     file_name: str = "run_time.csv"
+    path = os.path.join(["..", file_name])
 
     plot_name: str = "run_time_plot"
     col_names = ["model_id", "n_features", "interaction_order", "depth", "n_nodes",
                  "n_decision_nodes", "n_leaves", "leaves_times_depth", "elapsed_time"]
 
-    run_time_df = pd.read_csv(path+file_name)
+    run_time_df = pd.read_csv(path)
 
     # get mean and std for each max_interaction_order of elapsed time
     run_time_df = run_time_df.groupby(
